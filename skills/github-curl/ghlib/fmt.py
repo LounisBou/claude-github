@@ -137,6 +137,34 @@ def _login(obj):
     return (obj or {}).get("login") or ""
 
 
+def _comment_bodies(obj):
+    if not isinstance(obj, list):
+        return ""
+    return "\n---\n".join((c.get("body") or "") for c in obj if isinstance(c, dict))
+
+
+def _pending_review_summary(obj):
+    review = (obj or {}).get("review")
+    if not review:
+        return "none"
+    comments = (obj or {}).get("comments") or []
+    lines = [
+        "id %s" % review.get("id"),
+        "node_id %s" % review.get("node_id"),
+        "state %s" % review.get("state"),
+        "comments %d" % len(comments),
+        "",
+        "| path | line | commit_id |",
+        "|---|---|---|",
+    ]
+    for comment in comments:
+        # A pending review's comments carry position, not line; show whichever
+        # GitHub sent so the table is never blank.
+        line = comment.get("line") if comment.get("line") is not None else comment.get("position")
+        lines.append("| %s | %s | %s |" % (comment.get("path"), line, comment.get("commit_id")))
+    return "\n".join(lines)
+
+
 _FORMATTERS = {
     "raw": _raw,
     "error-check": _error_check,
@@ -151,6 +179,8 @@ _FORMATTERS = {
     "resolve-status": _resolve_status,
     "issue-comments-summary": _issue_comments_summary,
     "login": _login,
+    "pending-review-summary": _pending_review_summary,
+    "comment-bodies": _comment_bodies,
 }
 
 

@@ -123,6 +123,20 @@ def review_pending(args):
     return {"login": login, "review": review, "comments": comments}
 
 
+def repo_review_comments(args):
+    owner, name = repo.owner_repo()
+    # One page of the newest comments is enough to read a reviewer's habits;
+    # walking every page of a large repository is not.
+    comments = http.rest(
+        "GET", "/repos/%s/%s/pulls/comments?sort=created&direction=desc&per_page=100" % (owner, name)
+    )
+    if not isinstance(comments, list):
+        comments = []
+    if args.author:
+        comments = [c for c in comments if (c.get("user") or {}).get("login") == args.author]
+    return comments[: args.limit]
+
+
 def register(subparsers):
     parser = subparsers.add_parser("review-pending-create", help="open a review left PENDING, never submitted")
     parser.add_argument("pr", type=int)
@@ -147,3 +161,8 @@ def register(subparsers):
     parser.add_argument("pr", type=int)
     parser.add_argument("--author", default=None, help="login (default: the token's user)")
     parser.set_defaults(handler=review_pending)
+
+    parser = subparsers.add_parser("repo-review-comments", help="the newest review comments of the repository")
+    parser.add_argument("--author", default=None, help="keep only this login's comments")
+    parser.add_argument("--limit", type=int, default=30)
+    parser.set_defaults(handler=repo_review_comments)

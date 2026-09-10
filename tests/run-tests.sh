@@ -778,6 +778,29 @@ check "no mutation is sent for a refused add" "0" \
   "$(: > "$F4/sent.jsonl"; gh4 review-pending-add 7 --review-id 6 --path src/a.py --line 12 --body-file "$WORK/thread.md" >/dev/null 2>&1; grep -c '"query"' "$F4/sent.jsonl")"
 check_status "an empty body file exits 1" 1 sh -c ": > '$WORK/empty-thread.md'; $(printf '%q ' env GH_FIXTURES="$F4" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py") review-pending-add 7 --review-id 5 --path src/a.py --line 12 --body-file '$WORK/empty-thread.md'"
 
+printf '%s' '[{"user":{"login":"me"},"body":"Please rename this."},{"user":{"login":"other"},"body":"Merci."},{"user":{"login":"me"},"body":"Second one."},{"user":null,"body":"ghost"}]' \
+  > "$F4/GET_repos_acme_thing_pulls_comments__sort=created&direction=desc&per_page=100.json"
+check "repo-review-comments filters on the author" "2" \
+  "$(gh4 repo-review-comments --author me | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+check "repo-review-comments honours --limit" "1" \
+  "$(gh4 repo-review-comments --author me --limit 1 | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+check "a deleted-account author does not crash the filter" "4" \
+  "$(gh4 repo-review-comments | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+check "repo-review-comments asks for the newest first" "1" \
+  "$(: > "$F4/sent.jsonl"; gh4 repo-review-comments >/dev/null; grep -c 'sort=created&direction=desc&per_page=100' "$F4/sent.jsonl")"
+check "comment-bodies prints the bodies only" "Please rename this.|---|Second one." \
+  "$(gh4 repo-review-comments --author me --format comment-bodies | paste -sd'|' -)"
+check "comment-bodies on an empty list prints nothing" "" \
+  "$(gh4 repo-review-comments --author nobody --format comment-bodies)"
+
+summary=$(gh4 review-pending 7 --format pending-review-summary)
+check "pending-review-summary heads with id, node_id, state, count" "id 5 node_id PRR_5 state PENDING comments 2" \
+  "$(printf '%s\n' "$summary" | head -4 | paste -sd' ' -)"
+check "pending-review-summary tables path, position and commit" "| src/b.py | 9 | abc123 |" \
+  "$(printf '%s\n' "$summary" | tail -1)"
+check "pending-review-summary prints none without a review" "none" \
+  "$(gh4 review-pending 7 --author nobody --format pending-review-summary)"
+
 # Read the live parser: a subcommand that exists but is not written down is one
 # no skill will ever call, so the suite enforces the documentation rather than
 # trusting the author to remember.

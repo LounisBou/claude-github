@@ -118,6 +118,7 @@ submitting is the operator's act, on GitHub.
 | `review-pending-create` | `<pr> --comments-file P` | Open a review left PENDING with inline comments; refuses if the token's user already has one on the PR |
 | `review-pending-add` | `<pr> --review-id ID --path P --line N [--start-line N] --body-file P` | Add an inline thread to the token user's PENDING review (GraphQL `addPullRequestReviewThread`) |
 | `review-pending` | `<pr> [--author LOGIN]` | The PENDING review of a user (default: the token's) with its comments |
+| `repo-review-comments` | `[--author LOGIN] [--limit N]` | The newest review comments of the repository (one page), filtered on a login, default limit 30 |
 
 `--comments-file` holds a non-empty JSON array of `{path, line, body}` objects; `side`
 defaults to `RIGHT`, a range adds `start_line` (below `line`) and `start_side` (defaults
@@ -171,6 +172,8 @@ shape is asked for.
 | `resolve-status` | `thread-resolve` | `resolved` or `unresolved` |
 | `issue-comments-summary` | `pr-issue-comments` | a markdown table |
 | `login` | `auth-check` | the login, or empty |
+| `pending-review-summary` | `review-pending` | `none`, or `id`, `node_id`, `state`, `comments N` and a `path | line | commit_id` table |
+| `comment-bodies` | `repo-review-comments`, `pr-comments` | the bodies only, separated by `---` |
 
 ## Image upload
 
