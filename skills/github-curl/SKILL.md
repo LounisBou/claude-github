@@ -115,7 +115,13 @@ submitting is the operator's act, on GitHub.
 
 | Subcommand | Arguments | Description |
 |---|---|---|
+| `review-pending-create` | `<pr> --comments-file P` | Open a review left PENDING with inline comments; refuses if the token's user already has one on the PR |
 | `review-pending` | `<pr> [--author LOGIN]` | The PENDING review of a user (default: the token's) with its comments |
+
+`--comments-file` holds a non-empty JSON array of `{path, line, body}` objects; `side`
+defaults to `RIGHT`, a range adds `start_line` (below `line`) and `start_side` (defaults
+to `RIGHT`). `commit_id` is the PR head, read by the tool. The request carries no
+`event`, which is what keeps the review pending.
 
 ### Metadata
 

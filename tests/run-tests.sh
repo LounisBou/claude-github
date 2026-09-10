@@ -692,6 +692,54 @@ check "review-pending returns the pending review and its comments" "5 2 me" \
 check "review-pending for another author finds nothing" "None 0 nobody" \
   "$(gh4 review-pending 7 --author nobody | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["review"], len(d["comments"]), d["login"])')"
 
+printf '%s' '{"id":9,"node_id":"PRR_9","state":"PENDING","user":{"login":"me"}}' > "$F4/POST_repos_acme_thing_pulls_7_reviews.json"
+cat > "$WORK/pending.json" <<'JSON'
+[{"path":"src/a.py","line":12,"body":"Consider renaming this."},
+ {"path":"src/b.py","line":30,"start_line":25,"body":"This block repeats the one above."}]
+JSON
+
+# No PENDING review by "me" yet: the fixture holds only a submitted one and a
+# pending one by a deleted account.
+printf '%s' '[{"id":6,"node_id":"PRR_6","state":"COMMENTED","user":{"login":"me"}},{"id":7,"node_id":"PRR_7","state":"PENDING","user":null}]' \
+  > "$F4/GET_repos_acme_thing_pulls_7_reviews__per_page=100.json"
+: > "$F4/sent.jsonl"
+gh4 review-pending-create 7 --comments-file "$WORK/pending.json" >/dev/null
+payload=$(python3 -c "
+import json
+for line in open('$F4/sent.jsonl'):
+    row = json.loads(line)
+    if row['method'] == 'POST' and row['path'].endswith('/pulls/7/reviews'):
+        b = row['body']
+        print(b['commit_id'], 'event' in b, len(b['comments']), b['comments'][0]['side'], b['comments'][1]['start_line'], b['comments'][1]['start_side'])
+")
+check "review-pending-create sends commit_id and comments, never event" "abc123 False 2 RIGHT 25 RIGHT" "$payload"
+
+printf '%s' '[{"id":5,"node_id":"PRR_5","state":"PENDING","user":{"login":"me"}},{"id":6,"node_id":"PRR_6","state":"COMMENTED","user":{"login":"me"}},{"id":7,"node_id":"PRR_7","state":"PENDING","user":null}]' \
+  > "$F4/GET_repos_acme_thing_pulls_7_reviews__per_page=100.json"
+check_status "review-pending-create refuses when a PENDING review exists" 1 gh4 review-pending-create 7 --comments-file "$WORK/pending.json"
+check "the refusal names the existing review and the add subcommand" "id 5 review-pending-add" \
+  "$(gh4 review-pending-create 7 --comments-file "$WORK/pending.json" 2>&1 >/dev/null | grep -oE 'id 5|review-pending-add' | paste -sd' ' -)"
+check "the refusal is one error line and no traceback" "1 0" "$(errshape gh4 review-pending-create 7 --comments-file "$WORK/pending.json")"
+
+# Each malformed comments file is refused by the validator, before any request:
+# the message names the defect, so a refusal by the guard above cannot pass for it.
+printf '%s' '{"path":"x"}' > "$WORK/bad-object.json"
+printf '%s' '[]' > "$WORK/bad-empty.json"
+printf '%s' '[{"path":"a","line":3}]' > "$WORK/bad-nobody.json"
+printf '%s' '[{"path":"a","line":"3","body":"b"}]' > "$WORK/bad-line.json"
+printf '%s' '[{"path":"a","line":3,"start_line":3,"body":"b"}]' > "$WORK/bad-range.json"
+for case in object empty nobody line range; do
+  check_status "a bad comments file ($case) exits 1" 1 gh4 review-pending-create 7 --comments-file "$WORK/bad-$case.json"
+  check "a bad comments file ($case) is one error line and no traceback" "1 0" "$(errshape gh4 review-pending-create 7 --comments-file "$WORK/bad-$case.json")"
+done
+check "the validator names the field" "body" \
+  "$(gh4 review-pending-create 7 --comments-file "$WORK/bad-nobody.json" 2>&1 >/dev/null | grep -o 'body' | head -1)"
+check "the validator names the range rule" "start_line" \
+  "$(gh4 review-pending-create 7 --comments-file "$WORK/bad-range.json" 2>&1 >/dev/null | grep -o 'start_line' | head -1)"
+check "no request is sent for a bad comments file" "0" \
+  "$(: > "$F4/sent.jsonl"; gh4 review-pending-create 7 --comments-file "$WORK/bad-range.json" >/dev/null 2>&1; wc -l < "$F4/sent.jsonl" | tr -d ' ')"
+check_status "a missing comments file exits 1" 1 gh4 review-pending-create 7 --comments-file "$WORK/nope.json"
+
 # Read the live parser: a subcommand that exists but is not written down is one
 # no skill will ever call, so the suite enforces the documentation rather than
 # trusting the author to remember.
