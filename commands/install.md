@@ -1,5 +1,5 @@
 ---
-description: Check that this plugin's dependencies are installed, enabled and authenticated
+description: Check that python3, curl, a GitHub token and a GitHub repository clone are available
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/install.sh:*), Read
 ---
 
