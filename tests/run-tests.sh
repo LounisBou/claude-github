@@ -798,6 +798,9 @@ check "comment-bodies prints the bodies only" "Please rename this.|---|Second on
   "$(gh4 repo-review-comments --author me --format comment-bodies | paste -sd'|' -)"
 check "comment-bodies on an empty list prints nothing" "" \
   "$(gh4 repo-review-comments --author nobody --format comment-bodies)"
+check "login formatter on a list of comments prints empty" "" \
+  "$(gh4 repo-review-comments --format login)"
+check_status "login formatter on a list of comments exits 0" 0 gh4 repo-review-comments --format login
 
 summary=$(gh4 review-pending 7 --format pending-review-summary)
 check "pending-review-summary heads with id, node_id, state, count" "id 5 node_id PRR_5 state PENDING comments 2" \
@@ -806,6 +809,16 @@ check "pending-review-summary tables path, position and commit" "| src/b.py | 9 
   "$(printf '%s\n' "$summary" | tail -1)"
 check "pending-review-summary prints none without a review" "none" \
   "$(gh4 review-pending 7 --author nobody --format pending-review-summary)"
+
+# A separate fixture write, restored right after: the review-5 comments
+# fixture above is shared with the count and table checks just above, so a
+# third entry here would change their expected values.
+cp "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json" "$WORK/reviews-5-comments-orig.json"
+printf '%s' '[{"path":"src/a.py","position":3,"commit_id":"abc123","body":"x"},{"path":"src/b.py","position":9,"commit_id":"abc123","body":"y"},{"path":"src/c.py","line":4,"body":"z"}]' \
+  > "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
+check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.py | 4 | ? |" \
+  "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
+cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
 check "manifest version" "0.2.0" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"

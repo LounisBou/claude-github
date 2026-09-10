@@ -171,7 +171,7 @@ shape is asked for.
 | `thread-summary` | `pr-threads` | a markdown table of open threads |
 | `resolve-status` | `thread-resolve` | `resolved` or `unresolved` |
 | `issue-comments-summary` | `pr-issue-comments` | a markdown table |
-| `login` | `auth-check` | the login, or empty |
+| `login` | `auth-check`, any list response | the login, or empty |
 | `pending-review-summary` | `review-pending` | `none`, or `id`, `node_id`, `state`, `comments N` and a `path | line | commit_id` table |
 | `comment-bodies` | `repo-review-comments`, `pr-comments` | the bodies only, separated by `---` |
 

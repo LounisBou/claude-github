@@ -134,7 +134,8 @@ def _pr_details(obj):
 
 
 def _login(obj):
-    return (obj or {}).get("login") or ""
+    item = _first(obj)
+    return (item or {}).get("login") or ""
 
 
 def _comment_bodies(obj):
@@ -158,10 +159,16 @@ def _pending_review_summary(obj):
         "|---|---|---|",
     ]
     for comment in comments:
+        if not isinstance(comment, dict):
+            continue
         # A pending review's comments carry position, not line; show whichever
         # GitHub sent so the table is never blank.
-        line = comment.get("line") if comment.get("line") is not None else comment.get("position")
-        lines.append("| %s | %s | %s |" % (comment.get("path"), line, comment.get("commit_id")))
+        line = comment.get("line")
+        if line is None:
+            line = comment.get("position")
+        if line is None:
+            line = "?"
+        lines.append("| %s | %s | %s |" % (comment.get("path") or "?", line, comment.get("commit_id") or "?"))
     return "\n".join(lines)
 
 
