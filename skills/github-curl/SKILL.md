@@ -116,6 +116,7 @@ submitting is the operator's act, on GitHub.
 | Subcommand | Arguments | Description |
 |---|---|---|
 | `review-pending-create` | `<pr> --comments-file P` | Open a review left PENDING with inline comments; refuses if the token's user already has one on the PR |
+| `review-pending-add` | `<pr> --review-id ID --path P --line N [--start-line N] --body-file P` | Add an inline thread to the token user's PENDING review (GraphQL `addPullRequestReviewThread`) |
 | `review-pending` | `<pr> [--author LOGIN]` | The PENDING review of a user (default: the token's) with its comments |
 
 `--comments-file` holds a non-empty JSON array of `{path, line, body}` objects; `side`

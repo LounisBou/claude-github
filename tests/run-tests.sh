@@ -740,6 +740,44 @@ check "no request is sent for a bad comments file" "0" \
   "$(: > "$F4/sent.jsonl"; gh4 review-pending-create 7 --comments-file "$WORK/bad-range.json" >/dev/null 2>&1; wc -l < "$F4/sent.jsonl" | tr -d ' ')"
 check_status "a missing comments file exits 1" 1 gh4 review-pending-create 7 --comments-file "$WORK/nope.json"
 
+printf '%s' '{"id":5,"node_id":"PRR_5","state":"PENDING","user":{"login":"me"}}' > "$F4/GET_repos_acme_thing_pulls_7_reviews_5.json"
+printf '%s' '{"id":6,"node_id":"PRR_6","state":"COMMENTED","user":{"login":"me"}}' > "$F4/GET_repos_acme_thing_pulls_7_reviews_6.json"
+printf '%s' '{"id":8,"node_id":"PRR_8","state":"PENDING","user":{"login":"someone-else"}}' > "$F4/GET_repos_acme_thing_pulls_7_reviews_8.json"
+printf '%s' '{"addPullRequestReviewThread":{"thread":{"id":"PRRT_1","comments":{"nodes":[{"id":"PRRC_1"}]}}}}' > "$F4/graphql.json"
+printf 'Rename `foo` to say what it holds.\n' > "$WORK/thread.md"
+
+: > "$F4/sent.jsonl"
+gh4 review-pending-add 7 --review-id 5 --path src/a.py --line 12 --body-file "$WORK/thread.md" >/dev/null
+mutation=$(python3 -c "
+import json
+rows = [json.loads(l) for l in open('$F4/sent.jsonl') if '\"query\"' in l]
+q, v = rows[-1]['query'], rows[-1]['variables']
+print('addPullRequestReviewThread' in q, 'pullRequestReviewId' in q, v['review'], v['pr'], v['path'], v['line'], v['side'], 'startLine' in v, v['body'].startswith('Rename'))
+")
+check "review-pending-add sends the thread mutation with both ids" "True True PRR_5 PR_kwDO src/a.py 12 RIGHT False True" "$mutation"
+
+: > "$F4/sent.jsonl"
+gh4 review-pending-add 7 --review-id 5 --path src/a.py --line 12 --start-line 8 --body-file "$WORK/thread.md" >/dev/null
+check "review-pending-add sends a range as startLine and startSide" "8 RIGHT" \
+  "$(python3 -c "
+import json
+rows = [json.loads(l) for l in open('$F4/sent.jsonl') if '\"query\"' in l]
+v = rows[-1]['variables']
+print(v.get('startLine'), v.get('startSide'))
+")"
+
+check_status "a start line not below the line exits 1" 1 gh4 review-pending-add 7 --review-id 5 --path src/a.py --line 12 --start-line 12 --body-file "$WORK/thread.md"
+check "a submitted review is refused by state" "not PENDING" \
+  "$(gh4 review-pending-add 7 --review-id 6 --path src/a.py --line 12 --body-file "$WORK/thread.md" 2>&1 >/dev/null | grep -o 'not PENDING' | head -1)"
+check "another user's pending review is refused by name" "someone-else" \
+  "$(gh4 review-pending-add 7 --review-id 8 --path src/a.py --line 12 --body-file "$WORK/thread.md" 2>&1 >/dev/null | grep -o 'someone-else' | head -1)"
+check "a refused add is one error line and no traceback" "1 0" \
+  "$(errshape gh4 review-pending-add 7 --review-id 8 --path src/a.py --line 12 --body-file "$WORK/thread.md")"
+check_status "a missing review exits 4" 4 gh4 review-pending-add 7 --review-id 404 --path src/a.py --line 12 --body-file "$WORK/thread.md"
+check "no mutation is sent for a refused add" "0" \
+  "$(: > "$F4/sent.jsonl"; gh4 review-pending-add 7 --review-id 6 --path src/a.py --line 12 --body-file "$WORK/thread.md" >/dev/null 2>&1; grep -c '"query"' "$F4/sent.jsonl")"
+check_status "an empty body file exits 1" 1 sh -c ": > '$WORK/empty-thread.md'; $(printf '%q ' env GH_FIXTURES="$F4" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py") review-pending-add 7 --review-id 5 --path src/a.py --line 12 --body-file '$WORK/empty-thread.md'"
+
 # Read the live parser: a subcommand that exists but is not written down is one
 # no skill will ever call, so the suite enforces the documentation rather than
 # trusting the author to remember.

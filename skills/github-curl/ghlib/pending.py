@@ -73,6 +73,48 @@ def review_pending_create(args):
     return http.rest("POST", "/repos/%s/%s/pulls/%s/reviews" % (owner, name, args.pr), payload)
 
 
+_ADD_THREAD = """
+mutation($review:ID!, $pr:ID!, $path:String!, $line:Int!, $side:DiffSide!,
+         $startLine:Int, $startSide:DiffSide, $body:String!) {
+  addPullRequestReviewThread(input:{pullRequestReviewId:$review, pullRequestId:$pr,
+      path:$path, line:$line, side:$side, startLine:$startLine, startSide:$startSide,
+      body:$body}) {
+    thread { id comments(first:1) { nodes { id } } }
+  }
+}
+"""
+
+
+def review_pending_add(args):
+    owner, name = repo.owner_repo()
+    body = bodies.read(args.body_file)
+    if args.start_line is not None and args.start_line >= args.line:
+        raise errors.UsageError("--start-line must be below --line")
+    review = http.rest("GET", "/repos/%s/%s/pulls/%s/reviews/%s" % (owner, name, args.pr, args.review_id))
+    if not review or "id" not in review:
+        raise errors.NotFound("review %s not found on pull request %s" % (args.review_id, args.pr))
+    if review.get("state") != "PENDING":
+        raise errors.UsageError("review %s is %s, not PENDING" % (args.review_id, review.get("state")))
+    login = _token_login()
+    author = (review.get("user") or {}).get("login")
+    if author != login:
+        raise errors.UsageError(
+            "review %s belongs to %s, not to the token's user %s" % (args.review_id, author, login)
+        )
+    variables = {
+        "review": review.get("node_id"),
+        "pr": _pr(owner, name, args.pr).get("node_id"),
+        "path": args.path,
+        "line": args.line,
+        "side": "RIGHT",
+        "body": body,
+    }
+    if args.start_line is not None:
+        variables["startLine"] = args.start_line
+        variables["startSide"] = "RIGHT"
+    return http.graphql(_ADD_THREAD, variables)
+
+
 def review_pending(args):
     owner, name = repo.owner_repo()
     login = args.author or _token_login()
@@ -91,6 +133,15 @@ def register(subparsers):
         help="JSON array of {path, line, body[, side, start_line, start_side]} objects",
     )
     parser.set_defaults(handler=review_pending_create)
+
+    parser = subparsers.add_parser("review-pending-add", help="add an inline thread to a PENDING review")
+    parser.add_argument("pr", type=int)
+    parser.add_argument("--review-id", dest="review_id", type=int, required=True)
+    parser.add_argument("--path", required=True)
+    parser.add_argument("--line", type=int, required=True)
+    parser.add_argument("--start-line", dest="start_line", type=int, default=None)
+    parser.add_argument("--body-file", dest="body_file", required=True)
+    parser.set_defaults(handler=review_pending_add)
 
     parser = subparsers.add_parser("review-pending", help="a user's PENDING review on a PR, with its comments")
     parser.add_argument("pr", type=int)
