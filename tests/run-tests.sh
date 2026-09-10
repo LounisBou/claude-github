@@ -801,6 +801,11 @@ check "pending-review-summary tables path, position and commit" "| src/b.py | 9 
 check "pending-review-summary prints none without a review" "none" \
   "$(gh4 review-pending 7 --author nobody --format pending-review-summary)"
 
+check "manifest version" "0.2.0" \
+  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
+check "marketplace version matches" "0.2.0 0.2.0" \
+  "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
+
 # Read the live parser: a subcommand that exists but is not written down is one
 # no skill will ever call, so the suite enforces the documentation rather than
 # trusting the author to remember.

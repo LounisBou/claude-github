@@ -1,7 +1,7 @@
 {
   "name": "github",
   "description": "GitHub API from the standard library: pull requests, review threads, comments, reviews, labels, issues, search and image attachments, without the gh CLI.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Lounis Bou",
     "email": "lounis.bou@gmail.com"
