@@ -112,7 +112,7 @@ def _call(method, path, body=None, accept="application/vnd.github+json"):
         "Authorization": "Bearer " + token(),
         "Accept": accept,
         "Content-Type": "application/json",
-        "User-Agent": "pr-review-plugin",
+        "User-Agent": "github-plugin",
     }
     for attempt in range(_MAX_RETRIES):
         status, data = _request(method, API + path, body, headers)
@@ -160,7 +160,7 @@ def graphql(query, variables):
     headers = {
         "Authorization": "Bearer " + token(),
         "Content-Type": "application/json",
-        "User-Agent": "pr-review-plugin",
+        "User-Agent": "github-plugin",
     }
     status, data = _request(
         "POST", "https://api.github.com/graphql", {"query": query, "variables": variables}, headers

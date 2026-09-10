@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub API calls for the pr-review plugin.
+"""GitHub API calls for the github plugin.
 
 Every text body is passed with --body-file, never as an argument, because
 multi-line markdown containing backticks and quotes does not survive a shell

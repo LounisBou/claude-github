@@ -59,110 +59,58 @@ check_status "missing python3 exits 11" 11 \
 # Not a git repository at all.
 mkdir -p "$WORK/norepo"
 check_status "not a git repo exits 13" 13 \
-  env HOME="$WORK" PR_REVIEW_SKIP_PLUGINS=1 sh -c "cd '$WORK/norepo' && /bin/bash '$ROOT/scripts/preflight.sh'"
+  env HOME="$WORK" sh -c "cd '$WORK/norepo' && /bin/bash '$ROOT/scripts/preflight.sh'"
 
 # A git repository whose origin is not GitHub.
 mkdir -p "$WORK/gitlab" && git -C "$WORK/gitlab" init -q -b main
 git -C "$WORK/gitlab" remote add origin https://gitlab.com/acme/thing.git
 check_status "non-github origin exits 13" 13 \
-  env HOME="$WORK" PR_REVIEW_SKIP_PLUGINS=1 sh -c "cd '$WORK/gitlab' && /bin/bash '$ROOT/scripts/preflight.sh'"
+  env HOME="$WORK" sh -c "cd '$WORK/gitlab' && /bin/bash '$ROOT/scripts/preflight.sh'"
 
 # The failure message names the remedy.
 msg=$(env PATH="$WORK/emptybin" HOME="$WORK" /bin/bash "$ROOT/scripts/preflight.sh" 2>&1 >/dev/null | grep -c '^fix:')
 check "failure prints a fix line" "1" "$msg"
 
-echo "== preflight: plugin dependencies =="
+echo "== preflight: GitHub token =="
 
 mkdir -p "$WORK/repo" && git -C "$WORK/repo" init -q -b main
 git -C "$WORK/repo" remote add origin https://github.com/acme/thing.git
-
-settings() { mkdir -p "$WORK/cfg"; printf '%s' "$1" > "$WORK/cfg/settings.json"; }
-pf() {
-  env HOME="$WORK" PR_REVIEW_SETTINGS="$WORK/cfg/settings.json" PR_REVIEW_SKIP_AUTH=1 \
-    sh -c "cd '$WORK/repo' && bash '$ROOT/scripts/preflight.sh'"
-}
-
-settings '{"enabledPlugins":{"pr-review-toolkit@claude-plugins-official":true,"code-review@claude-plugins-official":true}}'
-check_status "both dependencies enabled passes" 0 pf
-
-settings '{"enabledPlugins":{"pr-review-toolkit@claude-plugins-official":true,"code-review@claude-plugins-official":false}}'
-check_status "a disabled dependency exits 10" 10 pf
-
-settings '{"enabledPlugins":{"pr-review-toolkit@claude-plugins-official":true}}'
-check_status "an absent dependency exits 10" 10 pf
-
-settings '{ this is not json'
-check_status "malformed settings exits 10" 10 pf
-
-settings '{"enabledPlugins":{"pr-review-toolkit@claude-plugins-official":true,"code-review@claude-plugins-official":false}}'
-named=$(pf 2>&1 >/dev/null | grep -c 'code-review')
-check "the failure names the offending plugin" "2" "$named"
-
-settings '{"enabledPlugins":"not-a-dict"}'
-check_status "enabledPlugins as string exits 10" 10 pf
-
-settings '[]'
-check_status "top-level array exits 10" 10 pf
-
-settings '{"enabledPlugins":"not-a-dict"}'
-output=$(pf 2>&1)
-error_lines=$(printf '%s' "$output" | grep -c '^error:')
-fix_lines=$(printf '%s' "$output" | grep -c '^fix:')
-traceback_lines=$(printf '%s' "$output" | grep -cE 'Traceback|^[A-Za-z]*Error:')
-check "enabledPlugins string produces error lines" "2" "$error_lines"
-check "enabledPlugins string produces fix lines" "2" "$fix_lines"
-check "enabledPlugins string has no traceback" "0" "$traceback_lines"
-
-settings '[]'
-output=$(pf 2>&1)
-error_lines=$(printf '%s' "$output" | grep -c '^error:')
-fix_lines=$(printf '%s' "$output" | grep -c '^fix:')
-traceback_lines=$(printf '%s' "$output" | grep -cE 'Traceback|^[A-Za-z]*Error:')
-check "top-level array produces error lines" "2" "$error_lines"
-check "top-level array produces fix lines" "2" "$fix_lines"
-check "top-level array has no traceback" "0" "$traceback_lines"
-
-# A python3 that dies before printing anything is exactly the "missing"
-# variable being empty, which reads the same as "nothing is missing" unless
-# the interpreter's own exit code is checked. A fake python3 stands in: it
-# behaves like the real one for the earlier version check (invoked as
-# "python3 -", one argument) and dies silently for the dependency check
-# (invoked as "python3 - $SETTINGS", two arguments).
-mkdir -p "$WORK/pybin"
-cat > "$WORK/pybin/python3" <<'FAKEPY'
-#!/bin/sh
-cat >/dev/null
-if [ $# -le 1 ]; then
-  exit 0
-fi
-exit 1
-FAKEPY
-chmod +x "$WORK/pybin/python3"
-
-settings '{"enabledPlugins":{"pr-review-toolkit@claude-plugins-official":true,"code-review@claude-plugins-official":true}}'
-check_status "a crashing python3 exits 10, not 0" 10 \
-  env HOME="$WORK" PR_REVIEW_SETTINGS="$WORK/cfg/settings.json" PR_REVIEW_SKIP_AUTH=1 PATH="$WORK/pybin:$PATH" \
-    sh -c "cd '$WORK/repo' && bash '$ROOT/scripts/preflight.sh'"
-
-output=$(env HOME="$WORK" PR_REVIEW_SETTINGS="$WORK/cfg/settings.json" PR_REVIEW_SKIP_AUTH=1 PATH="$WORK/pybin:$PATH" \
-  sh -c "cd '$WORK/repo' && bash '$ROOT/scripts/preflight.sh'" 2>&1)
-check "a crashing python3 prints an error line" "1" "$(printf '%s' "$output" | grep -c '^error:')"
-check "a crashing python3 prints a fix line" "1" "$(printf '%s' "$output" | grep -c '^fix:')"
-
-echo "== preflight: GitHub token =="
 
 # Missing token, missing gh
 mkdir -p "$WORK/fakebin"
 printf '#!/bin/sh\nexit 1\n' > "$WORK/fakebin/gh"
 chmod +x "$WORK/fakebin/gh"
 check_status "missing token exits 12" 12 \
-  env -u GH_TOKEN HOME="$WORK" PR_REVIEW_SETTINGS="$WORK/cfg/settings.json" PR_REVIEW_SKIP_PLUGINS=1 PATH="$WORK/fakebin:$PATH" \
+  env -u GH_TOKEN HOME="$WORK" PATH="$WORK/fakebin:$PATH" \
     sh -c "cd '$WORK/repo' && bash '$ROOT/scripts/preflight.sh'"
 
 # Token via environment variable
 check_status "GH_TOKEN set exits 0" 0 \
-  env HOME="$WORK" PR_REVIEW_SETTINGS="$WORK/cfg/settings.json" PR_REVIEW_SKIP_PLUGINS=1 GH_TOKEN="dummy-token-12345" \
+  env HOME="$WORK" GH_TOKEN="dummy-token-12345" \
     sh -c "cd '$WORK/repo' && bash '$ROOT/scripts/preflight.sh'"
+
+echo "== preflight has no plugin dependency check =="
+
+check "no enabledPlugins read" "" \
+  "$(grep -o 'enabledPlugins' "$ROOT/scripts/preflight.sh" | head -1)"
+
+# The brief's suggested pipeline for this ("grep -o 'exit 10\|\" 10$|10$' | grep -c
+# '^10$' | grep -v '^0$'") never actually fires: grep -o's alternation prints the
+# *matched text itself* ("exit 10", not "10"), so the follow-up "^10$" line-match
+# never sees a bare "10" and the check reads "" whether or not exit 10 is present.
+# This version matches the token "10" as an exit-code argument directly (bounded by
+# non-digits so it can't be fooled by "11"/"110"/etc.) and reports the offending
+# line so a failure is legible instead of just a bare mismatch.
+check "no exit 10 in preflight.sh" "" \
+  "$(grep -nE '(^|[^0-9])10([^0-9]|$)' "$ROOT/scripts/preflight.sh")"
+
+# A settings file naming no plugins at all must not stop this plugin.
+printf '{"enabledPlugins":{}}' > "$WORK/empty-settings.json"
+mkdir -p "$WORK/ghrepo" && git -C "$WORK/ghrepo" init -q 2>/dev/null
+git -C "$WORK/ghrepo" remote add origin https://github.com/o/n.git 2>/dev/null
+check_status "no plugins enabled still exits 0" 0 \
+  env HOME="$WORK" GH_TOKEN=x PR_REVIEW_SETTINGS="$WORK/empty-settings.json" \
+  /bin/bash -c "cd '$WORK/ghrepo' && bash '$ROOT/scripts/preflight.sh'"
 
 echo "== http transport =="
 
@@ -757,24 +705,18 @@ check "install.sh is executable" "executable" \
   "$([ -x "$ROOT/install.sh" ] && echo executable || echo not-executable)"
 
 mkdir -p "$WORK/cfg"
-printf '%s' '{"enabledPlugins":{"pr-review-toolkit@claude-plugins-official":true,"code-review@claude-plugins-official":true}}' \
-  > "$WORK/cfg/settings.json"
 
 inst() {
-  env HOME="$WORK" PR_REVIEW_SETTINGS="$WORK/cfg/settings.json" PR_REVIEW_SKIP_AUTH=1 \
+  env HOME="$WORK" GH_SKIP_AUTH=1 \
     sh -c "cd '$WORK/repo' && /bin/bash '$ROOT/install.sh'"
 }
 
-check_status "install.sh succeeds when dependencies are met" 0 inst
+check_status "install.sh succeeds" 0 inst
 
 # It must write nothing: compare the whole listing before and after.
 before=$(find "$WORK/cfg" -type f | sort)
 inst >/dev/null 2>&1
 check "install.sh writes nothing" "$before" "$(find "$WORK/cfg" -type f | sort)"
-
-printf '%s' '{"enabledPlugins":{"pr-review-toolkit@claude-plugins-official":true,"code-review@claude-plugins-official":false}}' \
-  > "$WORK/cfg/settings.json"
-check_status "install.sh fails when a dependency is disabled" 10 inst
 
 check "both commands declare a description" "2" \
   "$(grep -l '^description:' "$ROOT"/commands/*.md 2>/dev/null | wc -l | tr -d ' ')"
@@ -782,10 +724,49 @@ check "both commands declare a description" "2" \
 check "no uninstall script exists" "" \
   "$(ls "$ROOT/uninstall.sh" 2>/dev/null || true)"
 
+echo "== doctor.md matches the retired exit code =="
+
+check "doctor.md documents no exit 10" "" \
+  "$(grep -c '^| `10`' "$ROOT/commands/doctor.md" | grep -v '^0$')"
+
 echo "== repository policy =="
 
 check "no attribution trailers in history" "0" \
   "$(cd "$ROOT" && git log --format='%B' | grep -ciE 'claude-session|co-authored-by|generated with')"
+
+# The old plugin (the one this tool was extracted from) must not still be named
+# anywhere a user or Claude actually reads or runs: the manifests, the command
+# docs, the skill doc, the README, install.sh's own output, and the
+# preflight/CLI code whose User-Agent header is sent to GitHub on every
+# request. tests/run-tests.sh itself is deliberately excluded: it is a
+# developer-only harness (never shipped to, or read by, a plugin user), and it
+# necessarily spells out the very string this check searches for in its own
+# source. A prior version of a similar check filtered grep -r output by the
+# repository's own path, which happened to contain the string being searched
+# for -- every line matched the exclusion and nothing was left to examine, so
+# the check passed on broken code. This check never filters by path: it reads
+# each file's content directly through git ls-files, so the search string
+# appearing in this very file (or in $ROOT) cannot silently swallow a real hit.
+# "pr-reviews" (the GitHub review-list subcommand and its docs) is a genuine,
+# unrelated feature name that happens to start with the same prefix, so the
+# pattern requires the character after "pr-review" not be "s".
+#
+# The file set is every file this repository ships and tracks (git ls-files),
+# minus this test suite itself -- a developer-only harness, never installed
+# or read as part of using the plugin, and the one file guaranteed to spell
+# out the search string in its own source.
+old_name_hits=""
+for f in $(cd "$ROOT" && git ls-files); do
+  case "$f" in
+    tests/run-tests.sh) continue ;;
+  esac
+  hit=$(grep -inE 'pr-review([^s]|$)' "$ROOT/$f" 2>/dev/null || true)
+  if [ -n "$hit" ]; then
+    old_name_hits="$old_name_hits
+$f: $hit"
+  fi
+done
+check "no user-facing file names the old plugin" "" "$old_name_hits"
 
 
 echo "== comment minimisation =="

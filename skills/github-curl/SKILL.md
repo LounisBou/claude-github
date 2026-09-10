@@ -26,10 +26,9 @@ Run this first and stop on a non-zero exit:
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"
 ```
 
-It verifies the two upstream plugins are installed **and enabled**, that `python3`,
-`curl` and a GitHub token are available, and that the working directory is a GitHub
-repository clone. On failure it prints one `error:` line and one `fix:` line naming
-what to do.
+It verifies that `python3`, `curl` and a GitHub token are available, and that the
+working directory is a GitHub repository clone. On failure it prints one `error:`
+line and one `fix:` line naming what to do.
 
 ## Usage
 

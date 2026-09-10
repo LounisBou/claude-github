@@ -13,16 +13,16 @@ bash "$ROOT/scripts/preflight.sh"
 code=$?
 
 if [ "$code" -eq 0 ]; then
-  echo "pr-review: all dependencies satisfied."
+  echo "github: all dependencies satisfied."
   echo
   echo "Skills available:"
-  echo "  /pr-review:start-review       walk through review feedback one item at a time"
-  echo "  /pr-review:process-comments   work through a PR's comments interactively"
-  echo "  /pr-review:auto-fix-loop      review, fix and re-review until clean"
+  echo "  github-curl   GitHub API calls from the standard library: pull requests,"
+  echo "                review threads, comments, reviews, labels, issues, search"
+  echo "                and image attachments"
   echo
   echo "GitHub tool: \${CLAUDE_PLUGIN_ROOT}/skills/github-curl/gh.py"
   exit 0
 fi
 
-echo "pr-review: not ready. Fix the item above, then run /pr-review:doctor again." >&2
+echo "github: not ready. Fix the item above, then run /github:doctor again." >&2
 exit "$code"
