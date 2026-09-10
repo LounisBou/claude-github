@@ -1,0 +1,9 @@
+.DS_Store
+*.bak
+__pycache__/
+*.pyc
+
+# The global ~/.gitignore on some machines ignores `docs/`. A repository
+# .gitignore takes precedence over global excludes, so this negation restores
+# docs/ for this project, where the design document is versioned.
+!docs/

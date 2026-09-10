@@ -1,0 +1,17 @@
+{
+  "name": "claude-github",
+  "owner": { "name": "Lounis Bou", "email": "lounis.bou@gmail.com" },
+  "metadata": {
+    "description": "GitHub API tooling for Claude Code",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "github",
+      "source": "./",
+      "description": "GitHub API from the standard library: pull requests, review threads, comments, reviews, labels, issues, search and image attachments, without the gh CLI.",
+      "version": "0.1.0",
+      "author": { "name": "Lounis Bou" }
+    }
+  ]
+}

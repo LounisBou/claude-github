@@ -1,0 +1,13 @@
+{
+  "name": "github",
+  "description": "GitHub API from the standard library: pull requests, review threads, comments, reviews, labels, issues, search and image attachments, without the gh CLI.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Lounis Bou",
+    "email": "lounis.bou@gmail.com"
+  },
+  "homepage": "https://github.com/LounisBou/claude-github",
+  "repository": "https://github.com/LounisBou/claude-github",
+  "license": "MIT",
+  "keywords": ["github", "api", "pull-request", "python", "stdlib"]
+}
