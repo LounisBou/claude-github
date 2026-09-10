@@ -732,8 +732,14 @@ for case in object empty nobody line range; do
   check_status "a bad comments file ($case) exits 1" 1 gh4 review-pending-create 7 --comments-file "$WORK/bad-$case.json"
   check "a bad comments file ($case) is one error line and no traceback" "1 0" "$(errshape gh4 review-pending-create 7 --comments-file "$WORK/bad-$case.json")"
 done
+check "the validator names the array rule (object)" "non-empty JSON array" \
+  "$(gh4 review-pending-create 7 --comments-file "$WORK/bad-object.json" 2>&1 >/dev/null | grep -o 'non-empty JSON array' | head -1)"
+check "the validator names the array rule (empty)" "non-empty JSON array" \
+  "$(gh4 review-pending-create 7 --comments-file "$WORK/bad-empty.json" 2>&1 >/dev/null | grep -o 'non-empty JSON array' | head -1)"
 check "the validator names the field" "body" \
   "$(gh4 review-pending-create 7 --comments-file "$WORK/bad-nobody.json" 2>&1 >/dev/null | grep -o 'body' | head -1)"
+check "the validator names the line rule" "line must be an integer" \
+  "$(gh4 review-pending-create 7 --comments-file "$WORK/bad-line.json" 2>&1 >/dev/null | grep -o 'line must be an integer' | head -1)"
 check "the validator names the range rule" "start_line" \
   "$(gh4 review-pending-create 7 --comments-file "$WORK/bad-range.json" 2>&1 >/dev/null | grep -o 'start_line' | head -1)"
 check "no request is sent for a bad comments file" "0" \
@@ -778,14 +784,14 @@ check "no mutation is sent for a refused add" "0" \
   "$(: > "$F4/sent.jsonl"; gh4 review-pending-add 7 --review-id 6 --path src/a.py --line 12 --body-file "$WORK/thread.md" >/dev/null 2>&1; grep -c '"query"' "$F4/sent.jsonl")"
 check_status "an empty body file exits 1" 1 sh -c ": > '$WORK/empty-thread.md'; $(printf '%q ' env GH_FIXTURES="$F4" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py") review-pending-add 7 --review-id 5 --path src/a.py --line 12 --body-file '$WORK/empty-thread.md'"
 
-printf '%s' '[{"user":{"login":"me"},"body":"Please rename this."},{"user":{"login":"other"},"body":"Merci."},{"user":{"login":"me"},"body":"Second one."},{"user":null,"body":"ghost"}]' \
+printf '%s' '[{"user":{"login":"other"},"body":"Merci."},{"user":{"login":"me"},"body":"Please rename this."},{"user":{"login":"me"},"body":"Second one."},{"user":null,"body":"ghost"}]' \
   > "$F4/GET_repos_acme_thing_pulls_comments__sort=created&direction=desc&per_page=100.json"
 check "repo-review-comments filters on the author" "2" \
   "$(gh4 repo-review-comments --author me | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 check "repo-review-comments honours --limit" "1" \
   "$(gh4 repo-review-comments --author me --limit 1 | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
-check "a deleted-account author does not crash the filter" "4" \
-  "$(gh4 repo-review-comments | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+check "a deleted-account author does not crash the filter" "2" \
+  "$(gh4 repo-review-comments --author me | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 check "repo-review-comments asks for the newest first" "1" \
   "$(: > "$F4/sent.jsonl"; gh4 repo-review-comments >/dev/null; grep -c 'sort=created&direction=desc&per_page=100' "$F4/sent.jsonl")"
 check "comment-bodies prints the bodies only" "Please rename this.|---|Second one." \
