@@ -107,6 +107,16 @@ Subcommands taking `--body-file`: `pr-comment`, `thread-reply`, `comment-edit`,
 `--comments-file` holds a JSON array of `{path, line, side, body}` objects.
 `APPROVE` may carry no body; the other two events need a body or inline comments.
 
+### Pending reviews
+
+A review left PENDING is invisible to the PR author until its owner submits it on
+GitHub. The tool opens one, adds to it and reads it back. It never submits one:
+submitting is the operator's act, on GitHub.
+
+| Subcommand | Arguments | Description |
+|---|---|---|
+| `review-pending` | `<pr> [--author LOGIN]` | The PENDING review of a user (default: the token's) with its comments |
+
 ### Metadata
 
 | Subcommand | Arguments | Description |
@@ -153,6 +163,7 @@ shape is asked for.
 | `thread-summary` | `pr-threads` | a markdown table of open threads |
 | `resolve-status` | `thread-resolve` | `resolved` or `unresolved` |
 | `issue-comments-summary` | `pr-issue-comments` | a markdown table |
+| `login` | `auth-check` | the login, or empty |
 
 ## Image upload
 

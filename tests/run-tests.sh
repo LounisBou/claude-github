@@ -663,6 +663,35 @@ echo "== skill documents =="
 
 SKILLDOC="$ROOT/skills/github-curl/SKILL.md"
 
+echo "== pending reviews =="
+
+# A fixture directory of its own, so the PR, user and reviews fixtures below
+# never overwrite the ones earlier sections rely on.
+F4="$WORK/fix4"; mkdir -p "$F4"
+gh4() { env GH_FIXTURES="$F4" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
+# The shape of a failure: how many error: lines and how many tracebacks reached
+# stderr. An exit code alone does not tell a mapped error from a crash.
+errshape() {
+  local out
+  out=$("$@" 2>&1 >/dev/null)
+  printf '%s %s' "$(printf '%s\n' "$out" | grep -c '^error:')" "$(printf '%s\n' "$out" | grep -c Traceback)"
+}
+
+printf '%s' '{"login":"me"}' > "$F4/GET_user.json"
+printf '%s' '{"number":7,"node_id":"PR_kwDO","head":{"sha":"abc123"}}' > "$F4/GET_repos_acme_thing_pulls_7.json"
+printf '%s' '[{"id":5,"node_id":"PRR_5","state":"PENDING","user":{"login":"me"}},{"id":6,"node_id":"PRR_6","state":"COMMENTED","user":{"login":"me"}},{"id":7,"node_id":"PRR_7","state":"PENDING","user":null}]' \
+  > "$F4/GET_repos_acme_thing_pulls_7_reviews__per_page=100.json"
+printf '%s' '[{"path":"src/a.py","position":3,"commit_id":"abc123","body":"x"},{"path":"src/b.py","position":9,"commit_id":"abc123","body":"y"}]' \
+  > "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
+
+check "login formatter prints the token login" "me" "$(gh4 auth-check --format login)"
+
+check "review-pending returns the pending review and its comments" "5 2 me" \
+  "$(gh4 review-pending 7 | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["review"]["id"], len(d["comments"]), d["login"])')"
+
+check "review-pending for another author finds nothing" "None 0 nobody" \
+  "$(gh4 review-pending 7 --author nobody | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["review"], len(d["comments"]), d["login"])')"
+
 # Read the live parser: a subcommand that exists but is not written down is one
 # no skill will ever call, so the suite enforces the documentation rather than
 # trusting the author to remember.

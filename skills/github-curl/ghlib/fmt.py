@@ -133,6 +133,10 @@ def _pr_details(obj):
     )
 
 
+def _login(obj):
+    return (obj or {}).get("login") or ""
+
+
 _FORMATTERS = {
     "raw": _raw,
     "error-check": _error_check,
@@ -146,6 +150,7 @@ _FORMATTERS = {
     "thread-summary": _thread_summary,
     "resolve-status": _resolve_status,
     "issue-comments-summary": _issue_comments_summary,
+    "login": _login,
 }
 
 
