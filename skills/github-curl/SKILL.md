@@ -74,7 +74,7 @@ Subcommands taking `--body-file`: `pr-comment`, `thread-reply`, `comment-edit`,
 | `pr-files` | `<pr>` | Changed paths with their patches, paginated |
 | `pr-commits` | `<pr>` | Commits on the PR, paginated |
 | `file-at-ref` | `<path> <ref>` | A file's contents at a ref |
-| `pr-create` | `--title T [--body-file P] [--base B] [--head H]` | Open a PR from the current branch |
+| `pr-create` | `--title T [--body-file P] [--base B] [--head H] [--draft]` | Open a PR from the current branch, `--draft` for a draft (the house default) |
 | `pr-merge` | `<pr> [--method merge\|squash\|rebase]` | Merge a PR |
 
 `file-at-ref` returns `content`, plus `binary`. When the file is not valid UTF-8,

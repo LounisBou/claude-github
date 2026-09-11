@@ -111,6 +111,8 @@ def pr_create(args):
     }
     if not payload["head"]:
         raise errors.UsageError("cannot determine the head branch; pass --head")
+    if args.draft:
+        payload["draft"] = True
     return http.rest("POST", "/repos/%s/%s/pulls" % (owner, name), payload)
 
 
@@ -157,6 +159,7 @@ def register(subparsers):
     parser.add_argument("--body-file", dest="body_file", default=None)
     parser.add_argument("--base", default="main")
     parser.add_argument("--head", default=None, help="defaults to the current branch")
+    parser.add_argument("--draft", action="store_true", help="open as a draft (the house default)")
     parser.set_defaults(handler=pr_create)
 
     parser = subparsers.add_parser("pr-merge", help="merge a PR")

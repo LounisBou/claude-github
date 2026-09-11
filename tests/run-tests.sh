@@ -639,6 +639,28 @@ for line in open('$F3/sent.jsonl'):
 check "pr-create sends title, base, head and the file body" \
   "A title main feature-x 'Body from a file with \`backticks\`\n'" "$created"
 
+check "pr-create without --draft sends no draft key" "" \
+  "$(python3 -c "
+import json
+for line in open('$F3/sent.jsonl'):
+    row = json.loads(line)
+    if row['method'] == 'POST' and row['path'].endswith('/pulls'):
+        print('draft' if 'draft' in row['body'] else '', end='')
+")"
+
+check "pr-create --draft returns the new number" "12" \
+  "$(gh3 pr-create --title 'A title' --body-file "$WORK/prbody.md" --head feature-x --draft --format pr-number)"
+
+draft_sent=$(python3 -c "
+import json
+for line in open('$F3/sent.jsonl'):
+    row = json.loads(line)
+    if row['method'] == 'POST' and row['path'].endswith('/pulls'):
+        last = row
+print(last['body'].get('draft'))
+")
+check "pr-create --draft sends draft true" "True" "$draft_sent"
+
 check_status "pr-create without a title exits 1" 1 gh3 pr-create --head feature-x
 
 printf '%s' '{"merged":true,"message":"Pull Request successfully merged"}' \
