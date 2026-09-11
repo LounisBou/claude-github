@@ -53,7 +53,10 @@ do — no list of omissions, no rejected alternatives, no things left untouched.
 a prerequisite positively ("X must have Y set", not "it will fail without Y").
 `Related PR:` is a plain last line, never a heading, and lists only directly
 dependent PRs: a release or upstream PR this one needs, the PR it is stacked on, a PR
-that will consume this work. Omit the whole block when nothing depends on this PR and
+that will consume this work. The PRs of one feature that live in different repositories
+(an API change with its front-office and back-office consumers) are dependent PRs of each
+other: each one lists the others, on every side, so a reviewer who opens any of them
+finds the whole set. Omit the whole block when nothing depends on this PR and
 it depends on nothing — never write `Related PR: none`. English always, with no
 semicolon. No workflow vocabulary. Every PR is opened as a draft (`pr-create
 --draft`, the house default), un-drafted only on the operator's explicit word.

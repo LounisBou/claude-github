@@ -910,7 +910,7 @@ check "WRITING.md headings are in order" \
 check "SKILL.md names a Writing rules section" "1" \
   "$(grep -c '^## Writing rules' "$SKILLDOC")"
 
-for needle in '--draft' 'Related PR:' 'no semicolon' 'never edited without' 'heading'; do
+for needle in '--draft' 'Related PR:' 'on every side' 'no semicolon' 'never edited without' 'heading'; do
   check "WRITING.md mentions '$needle'" "1" \
     "$(grep -qF -- "$needle" "$WRITINGDOC" && echo 1 || echo 0)"
 done
