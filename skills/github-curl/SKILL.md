@@ -60,6 +60,13 @@ stripping, no newline translation, so a CRLF file round-trips intact.
 Subcommands taking `--body-file`: `pr-comment`, `thread-reply`, `comment-edit`,
 `review-submit`, `pr-update`, `pr-create`.
 
+## Writing rules
+
+Before writing a commit message, a pull request title, a pull request description
+or a review comment, read `${CLAUDE_PLUGIN_ROOT}/skills/github-curl/WRITING.md`
+beside this file. Every text is checked against it before it leaves the machine.
+The file is the norm, this section only points at it.
+
 ## Subcommands
 
 ### Pull requests

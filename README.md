@@ -31,6 +31,9 @@ unchanged, CRLF included.
 **Failures are exit codes, not tracebacks.** `1` usage, `2` auth, `3` API error, `4`
 not found, `5` rate limited. A Python traceback is a bug.
 
+`skills/github-curl/WRITING.md` collects the writing rules this tool's users follow
+for commit messages, pull request titles, descriptions and review comments.
+
 Images are attached by committing them to a dedicated `pr-assets` branch through the
 Contents API with the scoped token, named after the SHA-256 of their bytes so the
 same screenshot uploads once. GitHub's own web upload endpoint would produce a

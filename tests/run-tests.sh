@@ -878,6 +878,74 @@ stale=$(grep -rn '\.claude/skills/' "$ROOT/skills" 2>/dev/null || true)
 check "no relative skill paths" "" "$stale"
 
 
+echo "== writing rules =="
+
+WRITINGDOC="$ROOT/skills/github-curl/WRITING.md"
+
+check "WRITING.md exists" "yes" "$([ -f "$WRITINGDOC" ] && echo yes || echo no)"
+
+# Fence-aware: a "## " inside a fenced example (the PR description template)
+# is not a section heading of the document itself.
+headings=$(python3 - "$WRITINGDOC" <<'PYHEAD'
+import sys
+FENCE = chr(96) * 3
+in_fence = False
+found = []
+for line in open(sys.argv[1], encoding="utf-8"):
+    stripped = line.rstrip("\n")
+    if stripped.startswith(FENCE):
+        in_fence = not in_fence
+        continue
+    if in_fence:
+        continue
+    if stripped.startswith("## "):
+        found.append(stripped[3:])
+print(" | ".join(found))
+PYHEAD
+)
+check "WRITING.md headings are in order" \
+  "Commit messages | Pull request titles | Pull request descriptions | Review comments" \
+  "$headings"
+
+check "SKILL.md names a Writing rules section" "1" \
+  "$(grep -c '^## Writing rules' "$SKILLDOC")"
+
+for needle in '--draft' 'Related PR:' 'no semicolon' 'never edited without' 'heading'; do
+  check "WRITING.md mentions '$needle'" "1" \
+    "$(grep -qF -- "$needle" "$WRITINGDOC" && echo 1 || echo 0)"
+done
+
+titles_concise=$(python3 - "$WRITINGDOC" <<'PYTITLES'
+import sys
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+start = lines.index("## Pull request titles")
+end = next(i for i in range(start + 1, len(lines)) if lines[i].startswith("## "))
+section = "\n".join(lines[start:end])
+print(1 if "concise" in section else 0)
+PYTITLES
+)
+check "titles section says short and concise" "1" "$titles_concise"
+
+# Same fence-aware pass, counting ";" instead of "## " lines.
+semicolons=$(python3 - "$WRITINGDOC" <<'PYSEMI'
+import sys
+FENCE = chr(96) * 3
+in_fence = False
+count = 0
+for line in open(sys.argv[1], encoding="utf-8"):
+    stripped = line.rstrip("\n")
+    if stripped.startswith(FENCE):
+        in_fence = not in_fence
+        continue
+    if in_fence:
+        continue
+    count += stripped.count(";")
+print(count)
+PYSEMI
+)
+check "no semicolon outside fences in WRITING.md" "0" "$semicolons"
+
+
 echo "== install =="
 
 # commands/install.md and commands/doctor.md both tell the user to run
