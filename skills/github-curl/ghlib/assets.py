@@ -64,7 +64,7 @@ def image_upload(args):
             },
         )
 
-    url = "https://raw.githubusercontent.com/%s/%s/%s/%s" % (owner, name, branch, blob)
+    url = "https://github.com/%s/%s/blob/%s/%s?raw=true" % (owner, name, branch, blob)
     return {"url": url, "markdown": "![](%s)" % url, "path": blob, "reused": reused}
 
 

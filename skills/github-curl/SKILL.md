@@ -187,12 +187,14 @@ shape is asked for.
 `image-upload` stores the file on a dedicated branch (`pr-assets` by default) through
 the Contents API, using the scoped token. The blob is named after the SHA-256 of its
 bytes, so uploading the same screenshot twice issues no write at all and reports
-`reused`. It prints both the raw URL and ready-to-paste markdown.
+`reused`. It prints both the URL and ready-to-paste markdown, as a
+`https://github.com/<owner>/<repo>/blob/<branch>/<blob>?raw=true` link — it goes
+through github.com, so it renders for anyone who can see the repository, private
+ones included.
 
 GitHub's web upload endpoint would produce a `user-attachments` URL, but it
 authenticates with browser session cookies rather than a scoped token. That route is
-deliberately not used: it would mean whole-account credentials on disk. The rendered
-result in a pull request is the same.
+deliberately not used: it would mean whole-account credentials on disk.
 
 Requires push access to the repository.
 

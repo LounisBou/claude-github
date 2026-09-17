@@ -604,11 +604,11 @@ printf '%s' '{"ref":"refs/heads/pr-assets"}' > "$F3/GET_repos_acme_thing_git_ref
 printf '%s' '{"content":{"path":"'"$SHA"'.png"}}' > "$F3/PUT_repos_acme_thing_contents_${SHA}.png.json"
 
 out=$(gh3 image-upload "$WORK/shot.png" --format raw)
-check "url points at the assets branch" \
-  "https://raw.githubusercontent.com/acme/thing/pr-assets/$SHA.png" \
+check "url points at the assets branch through github.com" \
+  "https://github.com/acme/thing/blob/pr-assets/$SHA.png?raw=true" \
   "$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])')"
 check "markdown is ready to paste" \
-  "![](https://raw.githubusercontent.com/acme/thing/pr-assets/$SHA.png)" \
+  "![](https://github.com/acme/thing/blob/pr-assets/$SHA.png?raw=true)" \
   "$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["markdown"])')"
 
 # An identical file already on the branch is not re-uploaded.
