@@ -618,6 +618,48 @@ check "an existing asset is reused" "True" \
 
 check_status "a missing image exits 1" 1 gh3 image-upload "$WORK/absent.png"
 
+titled=$(gh3 image-upload "$WORK/shot.png" --title "Login screen" --format raw)
+check "a title becomes a bold line above the image" \
+  "**Login screen**
+![Login screen](https://github.com/acme/thing/blob/pr-assets/$SHA.png?raw=true)" \
+  "$(printf '%s' "$titled" | python3 -c 'import json,sys; print(json.load(sys.stdin)["markdown"])')"
+check "the title is echoed back in the JSON" "Login screen" \
+  "$(printf '%s' "$titled" | python3 -c 'import json,sys; print(json.load(sys.stdin)["title"])')"
+
+untitled=$(gh3 image-upload "$WORK/shot.png" --format raw)
+check "without --title the markdown stays bare" \
+  "![](https://github.com/acme/thing/blob/pr-assets/$SHA.png?raw=true)" \
+  "$(printf '%s' "$untitled" | python3 -c 'import json,sys; print(json.load(sys.stdin)["markdown"])')"
+check "without --title the JSON carries no title key" "False" \
+  "$(printf '%s' "$untitled" | python3 -c 'import json,sys; print("title" in json.load(sys.stdin))')"
+
+check_status "a title over 60 characters exits 1" 1 \
+  gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..61})"
+check_status "an empty title after trim exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "   "
+
+printf 'another capture' > "$WORK/second.png"
+SHA2=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$WORK/second.png")
+printf '%s' '{"__status":404,"message":"Not Found"}' > "$F3/GET_repos_acme_thing_contents_${SHA2}.png__ref=pr-assets.json"
+printf '%s' '{"content":{"path":"'"$SHA2"'.png"}}' > "$F3/PUT_repos_acme_thing_contents_${SHA2}.png.json"
+
+multi=$(gh3 image-upload "$WORK/shot.png" "$WORK/second.png" --title "First" --title "Second" --format raw)
+check "two titled files are joined by one separator" \
+  "**First**
+![First](https://github.com/acme/thing/blob/pr-assets/$SHA.png?raw=true)
+
+---
+
+**Second**
+![Second](https://github.com/acme/thing/blob/pr-assets/$SHA2.png?raw=true)" \
+  "$(printf '%s' "$multi" | python3 -c 'import json,sys; print(json.load(sys.stdin)["markdown"])')"
+check "the separator appears exactly once" "1" \
+  "$(printf '%s' "$multi" | python3 -c 'import json,sys; print(json.load(sys.stdin)["markdown"].count("\n\n---\n\n"))')"
+check "multi-file JSON lists one entry per image" "2" \
+  "$(printf '%s' "$multi" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["images"]))')"
+
+check_status "a title count not matching the file count exits 1" 1 \
+  gh3 image-upload "$WORK/shot.png" "$WORK/second.png" --title "Only one"
+
 echo "== opening and merging a pull request =="
 
 printf '%s' '{"number":12,"html_url":"https://github.com/acme/thing/pull/12"}' \

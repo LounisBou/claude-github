@@ -11,6 +11,22 @@ import os
 
 from . import errors, http, repo
 
+MAX_TITLE_LENGTH = 60
+BLOCK_SEPARATOR = "\n\n---\n\n"
+
+
+def _clean_title(title):
+    if title is None:
+        return None
+    stripped = title.strip()
+    if not stripped or "\n" in stripped:
+        raise errors.UsageError("image title must be a short, single-line label")
+    if len(stripped) > MAX_TITLE_LENGTH:
+        raise errors.UsageError(
+            "image title is longer than %d characters: shorten it" % MAX_TITLE_LENGTH
+        )
+    return stripped
+
 
 def _blob_name(path):
     try:
@@ -41,12 +57,10 @@ def _ensure_branch(owner, name, branch):
     )
 
 
-def image_upload(args):
-    if not os.path.isfile(args.file):
-        raise errors.UsageError("no such image file: " + args.file)
-    owner, name = repo.owner_repo()
-    blob, payload = _blob_name(args.file)
-    branch = args.branch
+def _upload_one(owner, name, branch, path):
+    if not os.path.isfile(path):
+        raise errors.UsageError("no such image file: " + path)
+    blob, payload = _blob_name(path)
 
     reused = False
     try:
@@ -65,11 +79,54 @@ def image_upload(args):
         )
 
     url = "https://github.com/%s/%s/blob/%s/%s?raw=true" % (owner, name, branch, blob)
-    return {"url": url, "markdown": "![](%s)" % url, "path": blob, "reused": reused}
+    return url, blob, reused
+
+
+def _block(url, title):
+    if title:
+        return "**%s**\n![%s](%s)" % (title, title, url)
+    return "![](%s)" % url
+
+
+def image_upload(args):
+    files = args.file
+    if args.title is not None and len(args.title) != len(files):
+        raise errors.UsageError(
+            "expected %d --title value(s), one per file, got %d" % (len(files), len(args.title))
+        )
+    titles = [_clean_title(t) for t in args.title] if args.title is not None else [None] * len(files)
+
+    owner, name = repo.owner_repo()
+    branch = args.branch
+
+    if len(files) == 1:
+        url, blob, reused = _upload_one(owner, name, branch, files[0])
+        title = titles[0]
+        result = {"url": url, "markdown": _block(url, title), "path": blob, "reused": reused}
+        if title:
+            result["title"] = title
+        return result
+
+    images = []
+    blocks = []
+    for path, title in zip(files, titles):
+        url, blob, reused = _upload_one(owner, name, branch, path)
+        entry = {"url": url, "path": blob, "reused": reused}
+        if title:
+            entry["title"] = title
+        images.append(entry)
+        blocks.append(_block(url, title))
+    return {"images": images, "markdown": BLOCK_SEPARATOR.join(blocks)}
 
 
 def register(subparsers):
-    parser = subparsers.add_parser("image-upload", help="store an image and return its URL")
-    parser.add_argument("file")
+    parser = subparsers.add_parser("image-upload", help="store one or more images and return their URLs")
+    parser.add_argument("file", nargs="+")
     parser.add_argument("--branch", default="pr-assets")
+    parser.add_argument(
+        "--title",
+        action="append",
+        help="short label (max %d characters) shown above its image; repeat once per file"
+        % MAX_TITLE_LENGTH,
+    )
     parser.set_defaults(handler=image_upload)

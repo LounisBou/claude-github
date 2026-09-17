@@ -156,7 +156,7 @@ to `RIGHT`). `commit_id` is the PR head, read by the tool. The request carries n
 
 | Subcommand | Arguments | Description |
 |---|---|---|
-| `image-upload` | `<file> [--branch pr-assets]` | Store an image, return its URL and markdown |
+| `image-upload` | `<file>... [--branch pr-assets] [--title T]...` | Store one or more images, return their URLs and markdown |
 | `auth-check` | | Verify the token |
 
 ## Formatters
@@ -195,6 +195,35 @@ ones included.
 GitHub's web upload endpoint would produce a `user-attachments` URL, but it
 authenticates with browser session cookies rather than a scoped token. That route is
 deliberately not used: it would mean whole-account credentials on disk.
+
+`--title T` puts a short label above the image, as a bold line followed by the image
+with the title as alt text. A title is a short label, not a sentence — 60 characters
+or fewer, trimmed, one line:
+
+```
+python3 "$GH" image-upload screenshot.png --title "Login screen"
+# **Login screen**
+# ![Login screen](https://github.com/acme/thing/blob/pr-assets/<sha>.png?raw=true)
+```
+
+`image-upload` also takes several files in one call, each with its own `--title`,
+repeated once per file in the same order. The `markdown` field joins each titled block
+with a horizontal rule, and the JSON carries an `images` list (one `{url, path, reused,
+title}` entry per file) instead of a single `url`/`path`/`reused`:
+
+```
+python3 "$GH" image-upload before.png after.png --title "Before" --title "After"
+# **Before**
+# ![Before](https://github.com/acme/thing/blob/pr-assets/<sha1>.png?raw=true)
+#
+# ---
+#
+# **After**
+# ![After](https://github.com/acme/thing/blob/pr-assets/<sha2>.png?raw=true)
+```
+
+`--title` given for a multi-file call must be repeated exactly once per file, or the
+call is refused as a usage error.
 
 Requires push access to the repository.
 
