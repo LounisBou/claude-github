@@ -884,9 +884,9 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.2.3" \
+check "manifest version" "0.2.4" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.2.3 0.2.3" \
+check "marketplace version matches" "0.2.4 0.2.4" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 # Read the live parser: a subcommand that exists but is not written down is one
@@ -1095,6 +1095,21 @@ rows = [json.loads(l) for l in open('$F3/sent.jsonl') if '\"query\"' in l]
 print('resolveThread' if 'resolveReviewThread' in rows[-1]['query'] else 'other')
 ")
 check "thread-resolve still resolves a thread" "resolveThread" "$tmutation"
+
+# comment-resolved must read isMinimized off the Minimizable interface, not
+# just IssueComment: a review body (PRR_...), a commit comment or a review
+# comment answer an empty node under the old query and read as "not minimized".
+printf '%s' '{"node":{"isMinimized":true,"minimizedReason":"resolved"}}' > "$F3/graphql.json"
+gh3 comment-resolved PRR_kwDOFgZ9Fc8AAAABN_aweg >/dev/null
+resolved_query=$(python3 -c "
+import json
+rows = [json.loads(l) for l in open('$F3/sent.jsonl') if '\"query\"' in l]
+print('minimizable' if 'Minimizable' in rows[-1]['query'] else 'other')
+")
+check "comment-resolved asks the Minimizable interface" "minimizable" "$resolved_query"
+
+resolved_state=$(gh3 comment-resolved PRR_kwDOFgZ9Fc8AAAABN_aweg | python3 -c 'import json,sys; print(json.load(sys.stdin)["node"]["isMinimized"])')
+check "a minimized review body reads as minimized" "True" "$resolved_state"
 
 
 echo "== skills call only what exists =="
