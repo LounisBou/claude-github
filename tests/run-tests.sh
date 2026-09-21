@@ -884,9 +884,9 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.2.4" \
+check "manifest version" "0.2.5" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.2.4 0.2.4" \
+check "marketplace version matches" "0.2.5 0.2.5" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 # Read the live parser: a subcommand that exists but is not written down is one
@@ -952,7 +952,7 @@ check "WRITING.md headings are in order" \
 check "SKILL.md names a Writing rules section" "1" \
   "$(grep -c '^## Writing rules' "$SKILLDOC")"
 
-for needle in '--draft' 'Related PR:' 'on every side' 'no semicolon' 'never edited without' 'heading'; do
+for needle in '--draft' '**Related PR(s):**' 'one `- ` bullet per link' 'on every side' 'no semicolon' 'never edited without' 'heading'; do
   check "WRITING.md mentions '$needle'" "1" \
     "$(grep -qF -- "$needle" "$WRITINGDOC" && echo 1 || echo 0)"
 done
