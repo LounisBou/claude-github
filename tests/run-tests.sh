@@ -1096,6 +1096,21 @@ print('resolveThread' if 'resolveReviewThread' in rows[-1]['query'] else 'other'
 ")
 check "thread-resolve still resolves a thread" "resolveThread" "$tmutation"
 
+# comment-resolved must read isMinimized off the Minimizable interface, not
+# just IssueComment: a review body (PRR_...), a commit comment or a review
+# comment answer an empty node under the old query and read as "not minimized".
+printf '%s' '{"node":{"isMinimized":true,"minimizedReason":"resolved"}}' > "$F3/graphql.json"
+gh3 comment-resolved PRR_kwDOFgZ9Fc8AAAABN_aweg >/dev/null
+resolved_query=$(python3 -c "
+import json
+rows = [json.loads(l) for l in open('$F3/sent.jsonl') if '\"query\"' in l]
+print('minimizable' if 'Minimizable' in rows[-1]['query'] else 'other')
+")
+check "comment-resolved asks the Minimizable interface" "minimizable" "$resolved_query"
+
+resolved_state=$(gh3 comment-resolved PRR_kwDOFgZ9Fc8AAAABN_aweg | python3 -c 'import json,sys; print(json.load(sys.stdin)["node"]["isMinimized"])')
+check "a minimized review body reads as minimized" "True" "$resolved_state"
+
 
 echo "== skills call only what exists =="
 
