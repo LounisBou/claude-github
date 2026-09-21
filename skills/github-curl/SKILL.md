@@ -100,9 +100,9 @@ The file is the norm, this section only points at it.
 | `comment-edit` | `<comment_id> --body-file P` | Edit a comment |
 | `comment-delete` | `<comment_id>` | Delete a comment |
 | `thread-resolve` | `<thread_id>` | Resolve a review thread |
-| `comment-resolve` | `<node_id>` | Minimise an issue comment |
-| `comment-unresolve` | `<node_id>` | Restore a minimised comment |
-| `comment-resolved` | `<node_id>` | Whether a comment is minimised |
+| `comment-resolve` | `<node_id>` | Minimise any minimizable node (issue comment, review body, commit comment) |
+| `comment-unresolve` | `<node_id>` | Restore a minimised node |
+| `comment-resolved` | `<node_id>` | Whether a node is minimised |
 | `comments-resolved-batch` | `<json_file>` | The same check for a JSON array of node ids |
 
 ### Reviews
