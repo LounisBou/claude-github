@@ -88,11 +88,13 @@ The file is the norm, this section only points at it.
 `binary` is true and `content` holds base64 — the bytes are never decoded lossily.
 
 `pr-merge --sha <full sha>` sends the head that was verified, and GitHub refuses the merge
-if the head has moved since. A PR that GitHub counts as part of a stack refuses the
-synchronous merge with a 403, so `pr-merge` then uses the asynchronous merge endpoint with
-the same method and sha and reads the PR until it is merged, for at most `GH_MERGE_WAIT`
+if the head has moved since.
+
+A PR that GitHub counts as part of a stack refuses the synchronous merge with a 403, so
+`pr-merge` then uses the asynchronous merge endpoint with the same method (and the same sha
+when `--sha` is given) and reads the PR until it is merged, for at most `GH_MERGE_WAIT`
 seconds (default 60). It prints the merge commit sha, or exits 3 naming the request's uuid
-when the merge is not seen in time. Any other error is reported as it is.
+if the merge fails or is not seen in time. Any other error is reported as it is.
 
 ### Review threads and comments
 
