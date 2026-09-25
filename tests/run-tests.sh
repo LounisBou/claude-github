@@ -1036,6 +1036,11 @@ check "manifest version" "0.2.5" \
 check "marketplace version matches" "0.2.5 0.2.5" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
+for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
+  check "SKILL.md documents '$needle'" "1" \
+    "$(grep -qF -- "$needle" "$SKILLDOC" && echo 1 || echo 0)"
+done
+
 # Read the live parser: a subcommand that exists but is not written down is one
 # no skill will ever call, so the suite enforces the documentation rather than
 # trusting the author to remember.
