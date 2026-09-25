@@ -869,6 +869,36 @@ print(result['sha'], len(sleeps), len(reads))
 ")
 check "the wait keeps reading until the PR is merged" "abc 2 3" "$polled"
 
+# The status endpoint is unmeasured, so whatever it answers with, an error of any
+# kind included, cannot end the wait: the PR's merged_at is the authority.
+status_err=$(GH_MERGE_WAIT=60 python3 -c "
+import sys, types
+sys.path.insert(0, '$GHDIR')
+from unittest.mock import patch
+from ghlib import errors, http, pr
+
+pulls = iter([
+    {'merged_at': None},
+    {'merged_at': '2026-09-25T10:00:00Z', 'merge_commit_sha': 'abc'},
+])
+
+def fake_rest(method, path, body=None, **kw):
+    if method == 'PUT' and path.endswith('/merge'):
+        raise errors.AuthError('$STACKED_MSG')
+    if method == 'PUT':
+        return {'status': 'pending', 'details': {'uuid': 'u-1'}}
+    if '/merge-async/' in path:
+        raise errors.ApiError('Validation Failed')
+    return next(pulls)
+
+args = types.SimpleNamespace(pr=7, method='squash', sha=None)
+with patch.object(http, 'rest', fake_rest), \\
+        patch.object(pr.repo, 'owner_repo', lambda: ('acme', 'thing')), \\
+        patch.object(pr.time, 'sleep', lambda s: None):
+    print(pr.pr_merge(args)['sha'])
+")
+check "a status read that fails with a 422 does not end the wait" "abc" "$status_err"
+
 
 echo "== skill documents =="
 

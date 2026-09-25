@@ -162,10 +162,10 @@ def _merge_wait():
 def _async_state(base, uuid):
     try:
         status = http.rest("GET", "%s/merge-async/%s" % (base, uuid))
-    except errors.NotFound:
+    except errors.GhError:
         # The status read is a shortcut to an early failure, not the authority:
-        # the PR's own merged_at decides, so a status that does not answer
-        # leaves the wait to the PR.
+        # the PR's own merged_at decides, so a status that does not answer, or
+        # answers with any error, leaves the wait to the PR and its timeout.
         return None
     return status.get("status") if isinstance(status, dict) else None
 
