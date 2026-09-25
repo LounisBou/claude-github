@@ -2,7 +2,10 @@
 
 import base64
 import binascii
+import os
+import re
 import subprocess
+import time
 from urllib.parse import quote
 
 from . import bodies, errors, http, repo
@@ -116,13 +119,87 @@ def pr_create(args):
     return http.rest("POST", "/repos/%s/%s/pulls" % (owner, name), payload)
 
 
+_MERGE_POLL = 3
+_FULL_SHA = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+
+
 def pr_merge(args):
     owner, name = repo.owner_repo()
-    return http.rest(
-        "PUT",
-        "/repos/%s/%s/pulls/%s/merge" % (owner, name, args.pr),
-        {"merge_method": args.method},
-    )
+    payload = {"merge_method": args.method}
+    if args.sha:
+        # A short or malformed sha would come back from GitHub as a moved head,
+        # which reads as a race rather than as a typo.
+        if not _FULL_SHA.match(args.sha):
+            raise errors.UsageError("--sha must be the full 40-character head sha")
+        payload["sha"] = args.sha
+    try:
+        return http.rest("PUT", "/repos/%s/%s/pulls/%s/merge" % (owner, name, args.pr), payload)
+    except errors.AuthError as exc:
+        # GitHub answers 403 for a PR that is part of a stack and names the
+        # asynchronous endpoint. That refusal is the only one followed: any
+        # other 403 is a real refusal and surfaces as it is.
+        if not _is_stacked_refusal(exc):
+            raise
+    return _merge_async(owner, name, args.pr, payload)
+
+
+def _is_stacked_refusal(exc):
+    text = exc.message.lower()
+    return "stacked" in text and "asynchronous merge" in text
+
+
+def _merge_wait():
+    raw = os.environ.get("GH_MERGE_WAIT", "60")
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = -1
+    if seconds < 0:
+        raise errors.UsageError("GH_MERGE_WAIT must be a number of seconds, got %r" % raw)
+    return seconds
+
+
+def _async_state(base, uuid):
+    try:
+        status = http.rest("GET", "%s/merge-async/%s" % (base, uuid))
+    except errors.GhError:
+        # The status read is a shortcut to an early failure, not the authority:
+        # the PR's own merged_at decides, so a status that does not answer, or
+        # answers with any error, leaves the wait to the PR and its timeout.
+        return None
+    return status.get("status") if isinstance(status, dict) else None
+
+
+def _merge_async(owner, name, number, payload):
+    wait = _merge_wait()
+    base = "/repos/%s/%s/pulls/%s" % (owner, name, number)
+    accepted = http.rest("PUT", base + "/merge-async", payload)
+    details = accepted.get("details") if isinstance(accepted, dict) else None
+    uuid = details.get("uuid") if isinstance(details, dict) else None
+    if not uuid:
+        raise errors.ApiError(
+            "merge-async did not return a uuid under details; read the PR with pr-status %s" % number
+        )
+
+    deadline = time.monotonic() + wait
+    while True:
+        pull = http.rest("GET", base)
+        if pull.get("merged_at"):
+            return {
+                "merged": True,
+                "sha": pull.get("merge_commit_sha"),
+                "message": "Pull Request merged asynchronously",
+                "uuid": uuid,
+            }
+        if _async_state(base, uuid) == "failed":
+            raise errors.ApiError("the asynchronous merge failed (uuid %s)" % uuid)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise errors.ApiError(
+                "timed out after %g seconds without seeing PR %s merged (uuid %s); "
+                "read it with pr-status %s" % (wait, number, uuid, number)
+            )
+        time.sleep(min(_MERGE_POLL, remaining))
 
 
 def register(subparsers):
@@ -165,4 +242,7 @@ def register(subparsers):
     parser = subparsers.add_parser("pr-merge", help="merge a PR")
     parser.add_argument("pr", type=int)
     parser.add_argument("--method", default="merge", choices=("merge", "squash", "rebase"))
+    parser.add_argument(
+        "--sha", default=None, help="full head sha that was verified; the merge is refused if the head moved"
+    )
     parser.set_defaults(handler=pr_merge)

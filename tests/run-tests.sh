@@ -722,6 +722,183 @@ check "pr-merge defaults to the merge method" "merge" "$merged"
 check_status "pr-merge rejects an unknown method" 1 gh3 pr-merge 7 --method fast-forward
 check_status "pr-merge rejects a non-numeric PR" 1 gh3 pr-merge abc
 
+# --sha pins the head that was verified: it travels as the API's own "sha", so
+# GitHub refuses the merge when the head moved. Without it no key is sent.
+HEAD_SHA=0123456789abcdef0123456789abcdef01234567
+: > "$F3/sent.jsonl"
+gh3 pr-merge 7 --method squash --sha "$HEAD_SHA" >/dev/null
+check "pr-merge --sha sends the sha and the method" "squash $HEAD_SHA" \
+  "$(python3 -c "
+import json
+for line in open('$F3/sent.jsonl'):
+    row = json.loads(line)
+    if row['method'] == 'PUT' and row['path'].endswith('/merge'):
+        print(row['body']['merge_method'], row['body'].get('sha'))
+")"
+
+: > "$F3/sent.jsonl"
+gh3 pr-merge 7 >/dev/null
+check "pr-merge without --sha sends no sha key" "False" \
+  "$(python3 -c "
+import json
+for line in open('$F3/sent.jsonl'):
+    row = json.loads(line)
+    if row['method'] == 'PUT' and row['path'].endswith('/merge'):
+        print('sha' in row['body'])
+")"
+
+# A short or malformed sha would be refused by GitHub as a moved head, which
+# reads as a race rather than as a typo: refuse it here, before any request.
+: > "$F3/sent.jsonl"
+check_status "pr-merge refuses a short sha" 1 gh3 pr-merge 7 --sha abc123
+check "a refused sha sends no request" "0" "$(wc -l < "$F3/sent.jsonl" | tr -d ' ')"
+
+# A PR that GitHub counts as part of a stack refuses the synchronous endpoint
+# with a 403 and asks for the asynchronous one. pr-merge follows that pointer,
+# with the same method and sha, then reads the PR until it is merged.
+F5="$WORK/fix5"; mkdir -p "$F5"
+gh5() { env GH_FIXTURES="$F5" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
+STACKED_MSG='Merging stacked PRs via this endpoint is not supported. Use the asynchronous merge endpoint instead.'
+MERGE_SHA=fedcba9876543210fedcba9876543210fedcba98
+# sent_rows <dir> <method> <path-suffix>: how many recorded requests match.
+sent_rows() {
+  python3 -c "
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1] + '/sent.jsonl')]
+print(sum(1 for r in rows if r['method'] == sys.argv[2] and r['path'].endswith(sys.argv[3])))
+" "$1" "$2" "$3"
+}
+
+printf '{"__status":403,"message":"%s"}' "$STACKED_MSG" > "$F5/PUT_repos_acme_thing_pulls_7_merge.json"
+printf '%s' '{"status":"pending","details":{"message":"Merge request enqueued.","uuid":"u-1234","merge_method":"squash","merge_action":"default","expected_head_sha":"'"$HEAD_SHA"'"}}' \
+  > "$F5/PUT_repos_acme_thing_pulls_7_merge-async.json"
+printf '%s' '{"number":7,"state":"closed","merged":true,"merged_at":"2026-09-25T10:00:00Z","merge_commit_sha":"'"$MERGE_SHA"'"}' \
+  > "$F5/GET_repos_acme_thing_pulls_7.json"
+
+out=$(gh5 pr-merge 7 --method squash --sha "$HEAD_SHA" --format raw)
+check "a stacked refusal falls back to async and reports the merge sha" "True $MERGE_SHA" \
+  "$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["merged"], d["sha"])')"
+check "the async request carries the same method and sha" "squash $HEAD_SHA" \
+  "$(python3 -c "
+import json
+for line in open('$F5/sent.jsonl'):
+    row = json.loads(line)
+    if row['method'] == 'PUT' and row['path'].endswith('/merge-async'):
+        print(row['body']['merge_method'], row['body'].get('sha'))
+")"
+check "the synchronous endpoint is tried once, first" "1" "$(sent_rows "$F5" PUT /pulls/7/merge)"
+
+# Only the stacked refusal is followed. Any other 403 surfaces as it is and no
+# asynchronous request is made.
+printf '%s' '{"__status":403,"message":"Resource not accessible by personal access token"}' \
+  > "$F5/PUT_repos_acme_thing_pulls_8_merge.json"
+check_status "a non-stacked 403 is not retried and exits 2" 2 gh5 pr-merge 8
+check "a non-stacked 403 makes no async request" "0" "$(sent_rows "$F5" PUT /pulls/8/merge-async)"
+check "a non-stacked 403 is sent once" "1" "$(sent_rows "$F5" PUT /pulls/8/merge)"
+
+# A merge that never shows up inside GH_MERGE_WAIT is a failure that names the
+# uuid, so the merge can still be looked up afterwards.
+printf '{"__status":403,"message":"%s"}' "$STACKED_MSG" > "$F5/PUT_repos_acme_thing_pulls_9_merge.json"
+printf '%s' '{"status":"pending","details":{"uuid":"u-9"}}' > "$F5/PUT_repos_acme_thing_pulls_9_merge-async.json"
+printf '%s' '{"number":9,"state":"open","merged":false,"merged_at":null,"merge_commit_sha":null}' \
+  > "$F5/GET_repos_acme_thing_pulls_9.json"
+# The status read may not answer at all: the PR's own state stays the authority,
+# so a 404 there is a wait that goes on, not a failure of its own.
+printf '%s' '{"__status":404,"message":"Not Found"}' > "$F5/GET_repos_acme_thing_pulls_9_merge-async_u-9.json"
+check_status "a merge not seen within GH_MERGE_WAIT exits 3" 3 \
+  env GH_MERGE_WAIT=0 GH_FIXTURES="$F5" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" pr-merge 9
+timeout_err=$(GH_MERGE_WAIT=0 gh5 pr-merge 9 2>&1 >/dev/null)
+check "the timeout names the uuid" "u-9" "$(printf '%s' "$timeout_err" | grep -o 'u-9' | head -1)"
+check "the timeout says so" "timed out" "$(printf '%s' "$timeout_err" | grep -o 'timed out' | head -1)"
+check "the timeout is one error line and no traceback" "1 0" \
+  "$(printf '%s\n' "$timeout_err" | grep -c '^error:') $(printf '%s\n' "$timeout_err" | grep -c Traceback)"
+
+# The async status, when it answers, ends the wait early on "failed".
+printf '{"__status":403,"message":"%s"}' "$STACKED_MSG" > "$F5/PUT_repos_acme_thing_pulls_10_merge.json"
+printf '%s' '{"status":"pending","details":{"uuid":"u-10"}}' > "$F5/PUT_repos_acme_thing_pulls_10_merge-async.json"
+printf '%s' '{"number":10,"state":"open","merged":false,"merged_at":null}' > "$F5/GET_repos_acme_thing_pulls_10.json"
+printf '%s' '{"status":"failed"}' > "$F5/GET_repos_acme_thing_pulls_10_merge-async_u-10.json"
+failed_err=$(GH_MERGE_WAIT=0 gh5 pr-merge 10 2>&1 >/dev/null)
+check "a failed async status ends the wait as a failure" "failed u-10" \
+  "$(printf '%s' "$failed_err" | grep -oE 'failed|u-10' | paste -sd' ' -)"
+
+# An accepted request with no uuid under "details" is not a merge to wait for.
+printf '{"__status":403,"message":"%s"}' "$STACKED_MSG" > "$F5/PUT_repos_acme_thing_pulls_11_merge.json"
+printf '%s' '{"status":"pending"}' > "$F5/PUT_repos_acme_thing_pulls_11_merge-async.json"
+check_status "an async answer with no uuid exits 3" 3 env GH_MERGE_WAIT=0 \
+  GH_FIXTURES="$F5" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" pr-merge 11
+check "an async answer with no uuid is refused for it" "did not return a uuid" \
+  "$(GH_MERGE_WAIT=0 gh5 pr-merge 11 2>&1 >/dev/null | grep -o 'did not return a uuid')"
+
+check_status "a non-numeric GH_MERGE_WAIT exits 1" 1 \
+  env GH_MERGE_WAIT=soon GH_FIXTURES="$F5" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" pr-merge 7
+
+# Fixtures answer the same way every time, so the wait itself is checked with
+# the transport replaced: two reads that find the PR open, then one that finds
+# it merged, and a sleep between reads.
+polled=$(GH_MERGE_WAIT=60 python3 -c "
+import sys, types
+sys.path.insert(0, '$GHDIR')
+from unittest.mock import patch
+from ghlib import errors, http, pr
+
+pulls = iter([
+    {'merged_at': None},
+    {'merged_at': None},
+    {'merged_at': '2026-09-25T10:00:00Z', 'merge_commit_sha': 'abc'},
+])
+reads = []
+
+def fake_rest(method, path, body=None, **kw):
+    if method == 'PUT' and path.endswith('/merge'):
+        raise errors.AuthError('$STACKED_MSG')
+    if method == 'PUT':
+        return {'status': 'pending', 'details': {'uuid': 'u-1'}}
+    if path.endswith('/pulls/7'):
+        reads.append(path)
+        return next(pulls)
+    return {'status': 'pending'}
+
+sleeps = []
+args = types.SimpleNamespace(pr=7, method='squash', sha=None)
+with patch.object(http, 'rest', fake_rest), \\
+        patch.object(pr.repo, 'owner_repo', lambda: ('acme', 'thing')), \\
+        patch.object(pr.time, 'sleep', sleeps.append):
+    result = pr.pr_merge(args)
+print(result['sha'], len(sleeps), len(reads))
+")
+check "the wait keeps reading until the PR is merged" "abc 2 3" "$polled"
+
+# The status endpoint is unmeasured, so whatever it answers with, an error of any
+# kind included, cannot end the wait: the PR's merged_at is the authority.
+status_err=$(GH_MERGE_WAIT=60 python3 -c "
+import sys, types
+sys.path.insert(0, '$GHDIR')
+from unittest.mock import patch
+from ghlib import errors, http, pr
+
+pulls = iter([
+    {'merged_at': None},
+    {'merged_at': '2026-09-25T10:00:00Z', 'merge_commit_sha': 'abc'},
+])
+
+def fake_rest(method, path, body=None, **kw):
+    if method == 'PUT' and path.endswith('/merge'):
+        raise errors.AuthError('$STACKED_MSG')
+    if method == 'PUT':
+        return {'status': 'pending', 'details': {'uuid': 'u-1'}}
+    if '/merge-async/' in path:
+        raise errors.ApiError('Validation Failed')
+    return next(pulls)
+
+args = types.SimpleNamespace(pr=7, method='squash', sha=None)
+with patch.object(http, 'rest', fake_rest), \\
+        patch.object(pr.repo, 'owner_repo', lambda: ('acme', 'thing')), \\
+        patch.object(pr.time, 'sleep', lambda s: None):
+    print(pr.pr_merge(args)['sha'])
+")
+check "a status read that fails with a 422 does not end the wait" "abc" "$status_err"
+
 
 echo "== skill documents =="
 
@@ -888,6 +1065,11 @@ check "manifest version" "0.2.5" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
 check "marketplace version matches" "0.2.5 0.2.5" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
+
+for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
+  check "SKILL.md documents '$needle'" "1" \
+    "$(grep -qF -- "$needle" "$SKILLDOC" && echo 1 || echo 0)"
+done
 
 # Read the live parser: a subcommand that exists but is not written down is one
 # no skill will ever call, so the suite enforces the documentation rather than
