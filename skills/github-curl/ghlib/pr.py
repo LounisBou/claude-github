@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import re
 import subprocess
 from urllib.parse import quote
 
@@ -116,13 +117,19 @@ def pr_create(args):
     return http.rest("POST", "/repos/%s/%s/pulls" % (owner, name), payload)
 
 
+_FULL_SHA = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+
+
 def pr_merge(args):
     owner, name = repo.owner_repo()
-    return http.rest(
-        "PUT",
-        "/repos/%s/%s/pulls/%s/merge" % (owner, name, args.pr),
-        {"merge_method": args.method},
-    )
+    payload = {"merge_method": args.method}
+    if args.sha:
+        # A short or malformed sha would come back from GitHub as a moved head,
+        # which reads as a race rather than as a typo.
+        if not _FULL_SHA.match(args.sha):
+            raise errors.UsageError("--sha must be the full 40-character head sha")
+        payload["sha"] = args.sha
+    return http.rest("PUT", "/repos/%s/%s/pulls/%s/merge" % (owner, name, args.pr), payload)
 
 
 def register(subparsers):
@@ -165,4 +172,7 @@ def register(subparsers):
     parser = subparsers.add_parser("pr-merge", help="merge a PR")
     parser.add_argument("pr", type=int)
     parser.add_argument("--method", default="merge", choices=("merge", "squash", "rebase"))
+    parser.add_argument(
+        "--sha", default=None, help="full head sha that was verified; the merge is refused if the head moved"
+    )
     parser.set_defaults(handler=pr_merge)

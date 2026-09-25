@@ -722,6 +722,37 @@ check "pr-merge defaults to the merge method" "merge" "$merged"
 check_status "pr-merge rejects an unknown method" 1 gh3 pr-merge 7 --method fast-forward
 check_status "pr-merge rejects a non-numeric PR" 1 gh3 pr-merge abc
 
+# --sha pins the head that was verified: it travels as the API's own "sha", so
+# GitHub refuses the merge when the head moved. Without it no key is sent.
+HEAD_SHA=0123456789abcdef0123456789abcdef01234567
+: > "$F3/sent.jsonl"
+gh3 pr-merge 7 --method squash --sha "$HEAD_SHA" >/dev/null
+check "pr-merge --sha sends the sha and the method" "squash $HEAD_SHA" \
+  "$(python3 -c "
+import json
+for line in open('$F3/sent.jsonl'):
+    row = json.loads(line)
+    if row['method'] == 'PUT' and row['path'].endswith('/merge'):
+        print(row['body']['merge_method'], row['body'].get('sha'))
+")"
+
+: > "$F3/sent.jsonl"
+gh3 pr-merge 7 >/dev/null
+check "pr-merge without --sha sends no sha key" "False" \
+  "$(python3 -c "
+import json
+for line in open('$F3/sent.jsonl'):
+    row = json.loads(line)
+    if row['method'] == 'PUT' and row['path'].endswith('/merge'):
+        print('sha' in row['body'])
+")"
+
+# A short or malformed sha would be refused by GitHub as a moved head, which
+# reads as a race rather than as a typo: refuse it here, before any request.
+: > "$F3/sent.jsonl"
+check_status "pr-merge refuses a short sha" 1 gh3 pr-merge 7 --sha abc123
+check "a refused sha sends no request" "0" "$(wc -l < "$F3/sent.jsonl" | tr -d ' ')"
+
 
 echo "== skill documents =="
 
