@@ -43,8 +43,20 @@ Follow this exact template:
 
 <explanation of a non-obvious decision — only if needed>
 
-**Related PR(s):**
-- <url of a PR this one directly depends on, or that directly depends on it>
+**TODO Staging:**
+- [ ] <deploy step for staging>
+- [ ] <next step>
+
+**TODO Prod:**
+- [ ] <deploy step for prod>
+- [ ] <next step>
+
+**PRs Dependency:**
+- <url of a PR that must ship before this one or at the same time>
+- <url of the next one>
+
+**Related PRs:**
+- <url of a PR truly linked to this work>
 - <url of the next one>
 ```
 
@@ -52,17 +64,20 @@ No heading of any kind: the description starts directly with the summary text, n
 with `## Summary` or any other title. State what the PR does, never what it does not
 do — no list of omissions, no rejected alternatives, no things left untouched. Phrase
 a prerequisite positively ("X must have Y set", not "it will fail without Y").
-`**Related PR(s):**` is the last block of the description, in that exact shape whatever
-the number of links: the bold label alone on its line, then one `- ` bullet per link, one
-link per line, nothing else on the line — the line break and the dash are what keep
+The four sections come after the summary text, in that order, each in that exact shape
+whatever the number of items: the bold label alone on its line, then one `- ` bullet per item, one
+item per line, nothing else on the line — the line break and the dash are what keep
 GitHub's preview rendering every link as a pull request card. Never a heading, never a
-link inline after the label. It lists only directly
-dependent PRs: a release or upstream PR this one needs, the PR it is stacked on, a PR
-that will consume this work. The PRs of one feature that live in different repositories
-(an API change with its front-office and back-office consumers) are dependent PRs of each
-other: each one lists the others, on every side, so a reviewer who opens any of them
-finds the whole set. Omit the whole block when nothing depends on this PR and
-it depends on nothing — never write `Related PR(s): none`. English always, with no
+link inline after the label. Every section is optional and present only when needed,
+never written empty or as `none`. A TODO section is mandatory whenever there is
+something to do at deployment. Staging and prod TODOs are always kept apart, even when
+they are the same items: then both sections list them. `**PRs Dependency:**` lists the
+PRs that must ship before this one or at the same time. When the order is not free, one
+PR strictly before the other (an API PR strictly before an infra PR, or the reverse),
+the TODOs say that order explicitly. `**Related PRs:**` lists the PRs truly linked to
+this work: part of the same batch, the origin of the bug, or a link of that strength,
+never a distant link. A follow-up PR, one that must come after this one, is never listed
+in Related PRs. English always, with no
 semicolon. No workflow vocabulary. Every PR is opened as a draft (`pr-create
 --draft`, the house default), un-drafted only on the operator's explicit word.
 An existing description is never edited without the operator's approval.
