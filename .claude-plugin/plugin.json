@@ -1,7 +1,7 @@
 {
   "name": "github",
   "description": "GitHub API from a native Claude Code tool: pull requests, review threads, comments, reviews, labels, issues, search and image attachments, facading a Python stdlib engine.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": {
     "name": "Lounis Bou",
     "email": "lounis.bou@gmail.com"
