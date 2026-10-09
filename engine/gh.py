@@ -19,7 +19,16 @@ _MODULES = (pr, comments, reviews, meta, pending, issues, assets)
 
 class _ArgumentParser(argparse.ArgumentParser):
     """Routes argparse's own usage failures through the same exit-code
-    mapping as every other usage error, instead of argparse's own exit(2)."""
+    mapping as every other usage error, instead of argparse's own exit(2).
+
+    Abbreviated flags are refused: `--body-f` would otherwise reach
+    --body-file, and the mod relies on that flag being its own to set.
+    Subparsers inherit this class, so the rule holds for every subcommand.
+    """
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
 
     def error(self, message):
         self.print_usage(sys.stderr)

@@ -420,6 +420,8 @@ for line in open('$F3/sent.jsonl'):
 check_status "body-file arrives byte-identical" 0 cmp -s "$BODY" "$WORK/sent-body.md"
 
 check_status "a missing body file exits 1" 1 gh3 pr-comment 7 --body-file "$WORK/nope.md"
+check_status "an abbreviated --body-file is refused as a usage error" 1 gh3 pr-comment 7 --body-f "$BODY"
+check_status "an abbreviated flag is refused on every subcommand" 1 gh3 pr-merge 7 --meth squash
 check_status "an empty body file exits 1" 1 sh -c ": > '$WORK/empty.md'; $(printf '%q ' env GH_FIXTURES="$F3" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py") pr-comment 7 --body-file '$WORK/empty.md'"
 
 echo "== review writes =="
