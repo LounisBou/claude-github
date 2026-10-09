@@ -127,6 +127,17 @@ export function toArgv(
   return { argv, files }
 }
 
+async function runGh($: any, command: string, args: Record<string, unknown> = {}, repo?: string): Promise<string> {
+  const { argv, files } = toArgv(command, args, repo)
+  for (const f of files) await $.fs.write(f.path, f.text)
+  const r = await $.process.run(
+    ['python3', $.plugin.root + '/engine/gh.py', command, ...argv],
+    { timeoutMs: 120_000 },
+  )
+  if (r.exitCode !== 0) throw new Error(r.stderr || 'gh.py exited ' + r.exitCode)
+  return r.stdout
+}
+
 export function register(on: any): void {
   on('session.start', async ($: any, e: any, next: any) => {
     const root = $.plugin.root
@@ -166,4 +177,14 @@ export function register(on: any): void {
     }
     return next(e)
   }).catch(async (_$: any, e: any, next: any) => next(e))
+
+  on('tool.call', { tool: 'mcp__github__gh' }, async ($: any, e: any) => {
+    try {
+      return { result: await runGh($, e.command, e.args ?? {}, e.repo) || '(no output)' }
+    } catch (err: any) {
+      return { result: String(err?.message ?? err), isError: true }
+    }
+  }).catch(async (_$: any, _e: any, next: any) =>
+    ({ result: 'github mod error: the hook failed; run /github:doctor for diagnostics', isError: true }),
+  )
 }

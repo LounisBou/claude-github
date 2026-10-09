@@ -62,3 +62,85 @@ test('toArgv rejects unknown commands, missing positionals and bad values', () =
   expect(() => toArgv('pr-status', { pr: { nested: true } })).toThrow(UsageError)
   expect(() => toArgv('pr-comment', { pr: 1, body: 42 })).toThrow(UsageError)
 })
+
+// reply: a fixed { exitCode, stdout, stderr } value, or a function (e) => value
+// for sequenced replies. Registered once per test — never register a second
+// process.run stub afterwards; pass a function instead.
+async function stubMod(
+  on: any,
+  runs: any[],
+  writes: any[],
+  reply: any = { exitCode: 0, stdout: 'ok', stderr: '' },
+) {
+  on('session.start', () => ({ cwd: '/work' }))
+  on('tool.register', () => ({ value: undefined }))
+  on('command.register', () => ({ value: undefined }))
+  on('fs.write', (_$: any, e: any) => {
+    writes.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
+  on('process.run', (_$: any, e: any) => {
+    runs.push(e.argv)
+    return { value: typeof reply === 'function' ? reply(e) : reply }
+  })
+}
+
+test('the gh tool runs gh.py with the mapped argv and preserves body bytes', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  await stubMod(on, runs, writes)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({
+    tool: 'mcp__github__gh',
+    command: 'pr-comment',
+    args: { pr: 12, body: 'hi **bold**\r\nsecond `line`' },
+    repo: 'acme/thing',
+  })
+
+  expect(out).toEqual({ result: 'ok' })
+  expect(writes.length).toBe(1)
+  expect(writes[0].text).toBe('hi **bold**\r\nsecond `line`')
+  const argv = runs[0]
+  expect(argv[0]).toBe('python3')
+  expect(argv[1].endsWith('/engine/gh.py')).toBe(true)
+  expect(argv[2]).toBe('pr-comment')
+  expect(argv[3]).toBe('12')
+  const i = argv.indexOf('--body-file')
+  expect(i).toBeGreaterThan(-1)
+  expect(argv[i + 1]).toBe(writes[0].path)
+  expect(argv[argv.length - 2]).toBe('--repo')
+})
+
+test('a non-zero gh.py exit returns isError with stderr', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  await stubMod(on, runs, writes, { exitCode: 4, stdout: '', stderr: 'error: not found' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-status', args: { pr: 99 } })
+  expect(out.isError).toBe(true)
+  expect(out.result).toBe('error: not found')
+})
+
+test('a rejected process.run surfaces as isError, not a skipped hook', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  await stubMod(on, runs, writes, { deny: 'python3: not found' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'auth-check' })
+  expect(out.isError).toBe(true)
+})
+
+test('a usage error in args is reported without running gh.py', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  await stubMod(on, runs, writes)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-status', args: {} })
+  expect(out.isError).toBe(true)
+  expect(String(out.result)).toContain('missing argument "pr"')
+  expect(runs.length).toBe(0)
+})
