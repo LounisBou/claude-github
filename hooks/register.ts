@@ -90,6 +90,9 @@ export function toArgv(
 
   for (const [key, value] of Object.entries(args ?? {})) {
     if (value === undefined || value === null) continue
+    if (key === 'body-file' || key === 'comments-file') {
+      throw new UsageError('"' + key + '" is managed by the mod; pass body or comments instead')
+    }
     const isPositional = positionals.some((p) => p === key || p === key + '...')
     if (key === 'body') {
       if (typeof value !== 'string') throw new UsageError('body must be a string')

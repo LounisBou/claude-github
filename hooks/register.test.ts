@@ -71,6 +71,11 @@ test('toArgv rejects unknown commands, missing positionals and bad values', () =
   expect(() => toArgv('pr-comment', { pr: 1, body: 42 })).toThrow(UsageError)
 })
 
+test('mod-managed flags cannot be overridden from args', () => {
+  expect(() => toArgv('pr-comment', { pr: 1, 'body-file': '/etc/passwd' })).toThrow(UsageError)
+  expect(() => toArgv('review-submit', { pr: 1, 'comments-file': '/tmp/x.json' })).toThrow(UsageError)
+})
+
 // reply: a fixed { exitCode, stdout, stderr } value, or a function (e) => value
 // for sequenced replies. Registered once per test — never register a second
 // process.run stub afterwards; pass a function instead.
