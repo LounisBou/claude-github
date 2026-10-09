@@ -24,8 +24,10 @@ Add the marketplace, then install the plugin:
 - **The `mcp__github__gh` tool** — pull requests, review threads, comments,
   reviews, labels, reviewers, issues, search and image attachments. Arguments
   travel as JSON, so multi-line markdown bodies (backticks, quotes, `$VAR`,
-  CRLF) arrive byte-identical: the mod writes each body to a file and hands it
-  to the engine as `--body-file`. Failures come back as `isError` with the
+  CRLF) arrive byte-identical: the mod hands the request to `gh.py
+  --stdin-json`, which maps it onto its own parser, refuses any argument that
+  parser does not declare, and passes each body as a private temporary file it
+  removes afterwards. Failures come back as `isError` with the
   engine's `error:` line; exit codes 1–5 are documented in
   `engine/REFERENCE.md`. Calls follow the session's permission rules: a
   `deny` rule refuses, reads run unless a rule asks, and every write asks

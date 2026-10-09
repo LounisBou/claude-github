@@ -4,53 +4,21 @@
 
 export const PANE_ID = 'github-prs'
 
-// One entry per gh.py subcommand: the positional argument names, in order.
-// A "name..." entry is variadic and takes an array. The tool's command enum
-// is Object.keys(POSITIONALS) — there is no second list to keep in sync.
-export const POSITIONALS: Record<string, string[]> = {
-  'pr-get': [],
-  'pr-list': [],
-  'pr-status': ['pr'],
-  'pr-checks': ['pr'],
-  'pr-diff': ['pr'],
-  'pr-files': ['pr'],
-  'pr-commits': ['pr'],
-  'file-at-ref': ['path', 'ref'],
-  'pr-create': [],
-  'pr-merge': ['pr'],
-  'pr-threads': ['pr'],
-  'pr-comments': ['pr'],
-  'pr-issue-comments': ['pr'],
-  'pr-reviews': ['pr'],
-  'thread-reply': ['thread_id'],
-  'pr-comment': ['pr'],
-  'comment-edit': ['comment_id'],
-  'comment-delete': ['comment_id'],
-  'thread-resolve': ['thread_id'],
-  'comment-resolve': ['node_id'],
-  'comment-unresolve': ['node_id'],
-  'comment-resolved': ['node_id'],
-  'comments-resolved-batch': ['nodes'],
-  'review-submit': ['pr'],
-  'review-pending-create': ['pr'],
-  'review-pending-add': ['pr'],
-  'review-pending': ['pr'],
-  'repo-review-comments': [],
-  'pr-update': ['pr'],
-  'pr-ready': ['pr'],
-  'label-add': ['pr', 'label...'],
-  'label-remove': ['pr', 'label'],
-  'reviewer-add': ['pr', 'user...'],
-  'reviewer-remove': ['pr', 'user...'],
-  'assignee-add': ['pr', 'user...'],
-  'assignee-remove': ['pr', 'user...'],
-  'issue-view': ['number'],
-  'issue-list': [],
-  'issue-search': ['term...'],
-  'pr-linked-issues': ['pr'],
-  'image-upload': ['file...'],
-  'auth-check': [],
-}
+// The gh.py subcommands, for the tool's command enum. gh.py itself maps the
+// arguments (--stdin-json); tests/run-tests.sh fails when this list and the
+// engine's parser disagree.
+export const COMMANDS = [
+  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-diff', 'pr-files',
+  'pr-commits', 'file-at-ref', 'pr-create', 'pr-merge', 'pr-threads',
+  'pr-comments', 'pr-issue-comments', 'pr-reviews', 'thread-reply',
+  'pr-comment', 'comment-edit', 'comment-delete', 'thread-resolve',
+  'comment-resolve', 'comment-unresolve', 'comment-resolved',
+  'comments-resolved-batch', 'review-submit', 'review-pending-create',
+  'review-pending-add', 'review-pending', 'repo-review-comments', 'pr-update',
+  'pr-ready', 'label-add', 'label-remove', 'reviewer-add', 'reviewer-remove',
+  'assignee-add', 'assignee-remove', 'issue-view', 'issue-list',
+  'issue-search', 'pr-linked-issues', 'image-upload', 'auth-check',
+]
 
 // The subcommands that only read. Every other one writes to GitHub, and a
 // command missing here is treated as a write, so the safe side is the default.
@@ -63,113 +31,16 @@ export const READS = new Set([
 
 export const TOOL = 'mcp__github__gh'
 
-export class UsageError extends Error {}
-
-let fileSeq = 0
-
-// Random per module load: two concurrent Claude sessions otherwise write the
-// same /tmp paths and can post each other's bodies.
-const loadId = (Math.random().toString(36) + '000000').slice(2, 8)
-
-function tmpPath(kind: string, ext: string): string {
-  fileSeq += 1
-  return '/tmp/claude-github-' + kind + '-' + loadId + '-' + fileSeq + ext
-}
-
-const FLAG_KEY = /^[a-z][a-z0-9-]*$/
-
-function strings(key: string, value: unknown): string[] {
-  if (Array.isArray(value)) {
-    if (value.some((v) => typeof v === 'object' || v === null)) {
-      throw new UsageError('array values must contain only scalars: ' + key)
-    }
-    return value.map((v) => String(v))
-  }
-  if (typeof value === 'string' || typeof value === 'number') return [String(value)]
-  throw new UsageError('unsupported value for "' + key + '"')
-}
-
-export function toArgv(
-  command: string,
-  args: Record<string, unknown>,
-  repo?: string,
-): { argv: string[]; files: { path: string; text: string }[] } {
-  const positionals = POSITIONALS[command]
-  if (!positionals) throw new UsageError('unknown command: ' + command)
-
-  const files: { path: string; text: string }[] = []
-  const flags: string[] = []
-  const byName: Record<string, string[]> = {}
-
-  for (const [key, value] of Object.entries(args ?? {})) {
-    if (value === undefined || value === null) continue
-    if (!FLAG_KEY.test(key)) throw new UsageError('invalid argument name: ' + JSON.stringify(key))
-    if (key === 'body-file' || key === 'comments-file') {
-      throw new UsageError('"' + key + '" is managed by the mod; pass body or comments instead')
-    }
-    const isVariadic = positionals.includes(key + '...')
-    const isPositional = isVariadic || positionals.includes(key)
-    if (key === 'body') {
-      if (typeof value !== 'string') throw new UsageError('body must be a string')
-      const path = tmpPath('body', '.md')
-      files.push({ path, text: value })
-      flags.push('--body-file=' + path)
-    } else if (key === 'comments') {
-      if (!Array.isArray(value)) throw new UsageError('comments must be an array')
-      const path = tmpPath('comments', '.json')
-      files.push({ path, text: JSON.stringify(value) })
-      flags.push('--comments-file=' + path)
-    } else if (isPositional && key === 'nodes') {
-      if (!Array.isArray(value)) throw new UsageError('nodes must be an array')
-      const path = tmpPath('nodes', '.json')
-      files.push({ path, text: JSON.stringify(value) })
-      byName[key] = [path]
-    } else if (isPositional) {
-      if (!isVariadic && Array.isArray(value)) throw new UsageError('"' + key + '" takes a single value')
-      byName[key] = strings(key, value)
-    } else if (typeof value === 'boolean') {
-      if (value) flags.push('--' + key)
-    } else if (typeof value === 'string' || typeof value === 'number') {
-      flags.push('--' + key + '=' + String(value))
-    } else if (Array.isArray(value)) {
-      for (const v of strings(key, value)) flags.push('--' + key + '=' + v)
-    } else {
-      throw new UsageError('unsupported value for "' + key + '"')
-    }
-  }
-
-  // Flags carry their value after "=", and positionals come after "--", so no
-  // value the model passes can be read as a flag: "--body-file=/etc/hosts" as
-  // a PR number stays a (rejected) PR number.
-  const argv: string[] = [...flags]
-  if (repo) argv.push('--repo=' + repo)
-  const values: string[] = []
-  for (const slot of positionals) {
-    const bare = slot.replace(/\.\.\.$/, '')
-    const got = byName[bare]
-    if (!got || got.length === 0) throw new UsageError('missing argument "' + bare + '" for ' + command)
-    values.push(...got)
-  }
-  if (values.length > 0) argv.push('--', ...values)
-  return { argv, files }
-}
-
+// The request travels as JSON on stdin: gh.py maps it onto its own parser,
+// refuses what that parser does not declare, and writes the bodies to a
+// private directory it removes. No argv is built and no file written here.
 async function runGh($: any, command: string, args: Record<string, unknown> = {}, repo?: string): Promise<string> {
-  const { argv, files } = toArgv(command, args, repo)
-  try {
-    for (const f of files) await $.fs.write(f.path, f.text)
-    const r = await $.process.run(
-      ['python3', $.plugin.root + '/engine/gh.py', command, ...argv],
-      { timeoutMs: 120_000 },
-    )
-    if (r.exitCode !== 0) throw new Error(r.stderr || 'gh.py exited ' + r.exitCode)
-    return r.isStdoutTruncated ? r.stdout + '\n[output cut at 4 MiB]' : r.stdout
-  } finally {
-    // The bodies may be private review text: none outlives its call.
-    if (files.length > 0) {
-      await $.process.run(['rm', '-f', ...files.map((f) => f.path)]).catch(() => undefined)
-    }
-  }
+  const r = await $.process.run(
+    ['python3', $.plugin.root + '/engine/gh.py', '--stdin-json'],
+    { stdin: JSON.stringify({ command, args, repo }), timeoutMs: 120_000 },
+  )
+  if (r.exitCode !== 0) throw new Error(r.stderr || 'gh.py exited ' + r.exitCode)
+  return r.isStdoutTruncated ? r.stdout + '\n[output cut at 4 MiB]' : r.stdout
 }
 
 /*
@@ -327,7 +198,7 @@ export function register(on: any): void {
       inputSchema: {
         type: 'object',
         properties: {
-          command: { type: 'string', enum: Object.keys(POSITIONALS) },
+          command: { type: 'string', enum: COMMANDS },
           args: {
             type: 'object',
             description: 'subcommand arguments: positionals by name, flags as keys',

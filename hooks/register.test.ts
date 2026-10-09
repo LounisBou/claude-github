@@ -1,12 +1,12 @@
 import { expect, test } from 'claude-code/testing'
-import { POSITIONALS, READS, toArgv, UsageError } from './register.js'
+import { COMMANDS, READS } from './register.js'
 
 test('session.start registers the gh tool and the three commands', async ($, on) => {
   const registered: string[] = []
   on('session.start', () => ({ cwd: '/work' }))
   on('tool.register', (_$, e) => {
     registered.push('tool:' + e.name)
-    expect(e.inputSchema.properties.command.enum).toEqual(Object.keys(POSITIONALS))
+    expect(e.inputSchema.properties.command.enum).toEqual(COMMANDS)
     expect(e.isDeferred).toBe(false)
     return { value: undefined }
   })
@@ -21,74 +21,6 @@ test('session.start registers the gh tool and the three commands', async ($, on)
   expect(registered).toContain('cmd:checks')
   expect(registered).toContain('cmd:threads')
   expect(registered).toContain('cmd:prs')
-})
-
-test('toArgv puts flags first, then --repo, then the positionals after --', () => {
-  const { argv, files } = toArgv('pr-checks', { format: 'checks-status', pr: 12 }, 'acme/thing')
-  expect(argv).toEqual(['--format=checks-status', '--repo=acme/thing', '--', '12'])
-  expect(files).toEqual([])
-})
-
-test('toArgv routes body and comments through temp files', () => {
-  const { argv, files } = toArgv('pr-comment', { pr: 7, body: 'hi\r\n`code` $VAR' })
-  expect(argv[argv.length - 1]).toBe('7')
-  expect(argv[0]).toBe('--body-file=' + files[0].path)
-  expect(files.length).toBe(1)
-  expect(files[0].text).toBe('hi\r\n`code` $VAR')
-  expect(files[0].path).toMatch(/^\/tmp\/claude-github-body-[a-z0-9]{6}-\d+\.md$/)
-
-  const r2 = toArgv('review-submit', { pr: 7, event: 'APPROVE', comments: [{ path: 'a.py', line: 3, body: 'x' }] })
-  expect(r2.argv).toContain('--comments-file=' + r2.files[0].path)
-  expect(r2.files[0].text).toBe(JSON.stringify([{ path: 'a.py', line: 3, body: 'x' }]))
-})
-
-test('temp file paths carry a per-load unique segment so sessions cannot collide', () => {
-  const a = toArgv('pr-comment', { pr: 1, body: 'x' })
-  const b = toArgv('pr-comment', { pr: 2, body: 'y' })
-  const paths = [...a.files, ...b.files].map((f) => f.path)
-  for (const p of paths) expect(p).toMatch(/^\/tmp\/claude-github-body-[a-z0-9]{6}-\d+\.md$/)
-  expect(new Set(paths).size).toBe(2)
-})
-
-test('toArgv handles variadic positionals, repeated flags and booleans', () => {
-  const { argv } = toArgv('label-add', { pr: 12, label: ['bug', 'ui'] })
-  expect(argv).toEqual(['--', '12', 'bug', 'ui'])
-  const img = toArgv('image-upload', { file: ['a.png', 'b.png'], title: ['Before', 'After'] })
-  expect(img.argv).toEqual(['--title=Before', '--title=After', '--', 'a.png', 'b.png'])
-  const draft = toArgv('pr-create', { title: 'T', draft: true, base: false })
-  expect(draft.argv).toEqual(['--title=T', '--draft'])
-})
-
-test('toArgv serializes nodes for comments-resolved-batch', () => {
-  const { argv, files } = toArgv('comments-resolved-batch', { nodes: ['IC_1', 'IC_2'] })
-  expect(argv).toEqual(['--', files[0].path])
-  expect(files[0].text).toBe(JSON.stringify(['IC_1', 'IC_2']))
-})
-
-test('toArgv rejects unknown commands, missing positionals and bad values', () => {
-  expect(() => toArgv('nope', {})).toThrow(UsageError)
-  expect(() => toArgv('pr-status', {})).toThrow(UsageError)
-  expect(() => toArgv('pr-status', { pr: { nested: true } })).toThrow(UsageError)
-  expect(() => toArgv('pr-comment', { pr: 1, body: 42 })).toThrow(UsageError)
-})
-
-test('mod-managed flags cannot be overridden from args', () => {
-  expect(() => toArgv('pr-comment', { pr: 1, 'body-file': '/etc/passwd' })).toThrow(UsageError)
-  expect(() => toArgv('review-submit', { pr: 1, 'comments-file': '/tmp/x.json' })).toThrow(UsageError)
-})
-
-test('no value can smuggle a flag into argv', () => {
-  // A single positional given as an array would splice extra argv entries.
-  expect(() => toArgv('pr-update', { pr: ['12', '--body-file=/etc/hosts'] })).toThrow(UsageError)
-  // A positional value that looks like a flag stays after "--".
-  const pos = toArgv('pr-status', { pr: '--body-file=/etc/hosts' })
-  expect(pos.argv).toEqual(['--', '--body-file=/etc/hosts'])
-  // A flag value that looks like a flag stays glued to its own flag.
-  const flag = toArgv('pr-create', { title: '--draft' })
-  expect(flag.argv).toEqual(['--title=--draft'])
-  // Keys are plain flag names only.
-  expect(() => toArgv('pr-comment', { pr: 1, body: 'x', 'x --body-file': 'y' })).toThrow(UsageError)
-  expect(() => toArgv('pr-comment', { pr: 1, body: 'x', '-body-file': 'y' })).toThrow(UsageError)
 })
 
 // reply: a fixed { exitCode, stdout, stderr } value, or a function (e) => value
@@ -110,12 +42,13 @@ async function stubMod(
     return { value: undefined }
   })
   on('process.run', (_$: any, e: any) => {
-    runs.push(e.argv)
+    // Each run is recorded as the request gh.py reads on stdin, plus its argv.
+    runs.push({ argv: e.argv, ...JSON.parse(e.init?.stdin ?? '{}') })
     return { value: typeof reply === 'function' ? reply(e) : reply }
   })
 }
 
-test('the gh tool runs gh.py with the mapped argv and preserves body bytes', async ($, on) => {
+test('the gh tool hands the request to gh.py on stdin, body bytes intact', async ($, on) => {
   const runs: any[] = []
   const writes: any[] = []
   await stubMod(on, runs, writes)
@@ -129,16 +62,14 @@ test('the gh tool runs gh.py with the mapped argv and preserves body bytes', asy
   })
 
   expect(out).toEqual({ result: 'ok' })
-  expect(writes.length).toBe(1)
-  expect(writes[0].text).toBe('hi **bold**\r\nsecond `line`')
-  const argv = runs[0]
-  expect(argv[0]).toBe('python3')
-  expect(argv[1].endsWith('/engine/gh.py')).toBe(true)
-  expect(argv[2]).toBe('pr-comment')
-  expect(argv).toContain('--body-file=' + writes[0].path)
-  expect(argv).toContain('--repo=acme/thing')
-  expect(argv.slice(-2)).toEqual(['--', '12'])
-  expect(runs[1]).toEqual(['rm', '-f', writes[0].path])
+  expect(writes.length).toBe(0)
+  expect(runs.length).toBe(1)
+  expect(runs[0].argv[0]).toBe('python3')
+  expect(runs[0].argv[1].endsWith('/engine/gh.py')).toBe(true)
+  expect(runs[0].argv.slice(2)).toEqual(['--stdin-json'])
+  expect(runs[0].command).toBe('pr-comment')
+  expect(runs[0].args).toEqual({ pr: 12, body: 'hi **bold**\r\nsecond `line`' })
+  expect(runs[0].repo).toBe('acme/thing')
 })
 
 test('a non-zero gh.py exit returns isError with stderr', async ($, on) => {
@@ -162,16 +93,14 @@ test('a rejected process.run surfaces as isError, not a skipped hook', async ($,
   expect(out.isError).toBe(true)
 })
 
-test('a usage error in args is reported without running gh.py', async ($, on) => {
+test('a usage error from the engine comes back as isError', async ($, on) => {
   const runs: any[] = []
-  const writes: any[] = []
-  await stubMod(on, runs, writes)
+  await stubMod(on, runs, [], { exitCode: 1, stdout: '', stderr: 'error: missing argument "pr" for pr-status\n' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
 
   const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-status', args: {} })
   expect(out.isError).toBe(true)
   expect(String(out.result)).toContain('missing argument "pr"')
-  expect(runs.length).toBe(0)
 })
 
 test('/checks reports the current branch PR CI status', async ($, on) => {
@@ -188,9 +117,9 @@ test('/checks reports the current branch PR CI status', async ($, on) => {
 
   const out = await $.command.run({ command: 'checks', args: '' })
   expect(out.text).toBe('#12 CI: SUCCESS')
-  expect(runs[0][2]).toBe('pr-get')
-  expect(runs[1][2]).toBe('pr-checks')
-  expect(runs[1]).toContain('12')
+  expect(runs[0].command).toBe('pr-get')
+  expect(runs[1].command).toBe('pr-checks')
+  expect(runs[1].args.pr).toBe('12')
 })
 
 test('/checks without a PR on the branch says so, in one call', async ($, on) => {
@@ -213,7 +142,7 @@ test('/threads with an explicit PR skips the lookup', async ($, on) => {
   const out = await $.command.run({ command: 'threads', args: ' 12 ' })
   expect(out.text).toBe('| thread | line |')
   expect(runs.length).toBe(1)
-  expect(runs[0][2]).toBe('pr-threads')
+  expect(runs[0].command).toBe('pr-threads')
 })
 
 test('command failures surface the engine error, not a generic diagnostics line', async ($, on) => {
@@ -241,12 +170,13 @@ const ok = (stdout: string) => ({ exitCode: 0, stdout, stderr: '' })
 // A process.run reply chosen by subcommand, so parallel runs need no order.
 function byCommand(replies: Record<string, (e: any) => any>) {
   return (e: any) => {
-    const reply = replies[e.argv[2]]
-    return reply ? reply(e) : { exitCode: 3, stdout: '', stderr: 'error: unexpected ' + e.argv[2] }
+    const { command } = JSON.parse(e.init.stdin)
+    const reply = replies[command]
+    return reply ? reply(e) : { exitCode: 3, stdout: '', stderr: 'error: unexpected ' + command }
   }
 }
 
-const prOf = (e: any) => e.argv[e.argv.length - 1]
+const prOf = (e: any) => String(JSON.parse(e.init.stdin).args.pr)
 
 test('/prs reads each listed PR in detail and opens the pane', async ($, on) => {
   const runs: any[] = []
@@ -266,7 +196,7 @@ test('/prs reads each listed PR in detail and opens the pane', async ($, on) => 
   expect(out).toEqual({})
   expect(opened).toEqual([{ id: 'github-prs', title: 'PRs', closeOnEscape: true }])
   expect(runs.length).toBe(5) // pr-list + (pr-checks, pr-status) x 2
-  expect(runs.filter((a) => a[2] === 'pr-status').map((a) => a[a.length - 1]).sort()).toEqual(['11', '12'])
+  expect(runs.filter((r) => r.command === 'pr-status').map((r) => String(r.args.pr)).sort()).toEqual(['11', '12'])
 })
 
 const PANE_EVENT = {
@@ -321,7 +251,7 @@ test('the pane lists every PR, details the newest five and marks unreadable chec
   expect(await ui.find({ type: 'Text', text: /PR 100 CI:\?/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /PR 99 CI:SUCCESS/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /PR 94 CI:–/ })).toBeDefined()
-  expect(runs.filter((a) => a[2] === 'pr-checks').length).toBe(5)
+  expect(runs.filter((r) => r.command === 'pr-checks').length).toBe(5)
   await ui.unmount()
 })
 
@@ -341,7 +271,7 @@ test('the pane with no open PRs says so and Refresh re-collects', async ($, on) 
 
   await ui.press({ key: 'refresh' })
   expect(await ui.find({ type: 'Text', text: /fix: related PRs/ })).toBeDefined()
-  expect(runs.filter((a) => a[2] === 'pr-list').length).toBe(2)
+  expect(runs.filter((r) => r.command === 'pr-list').length).toBe(2)
   await ui.unmount()
 })
 
@@ -370,11 +300,11 @@ test('/checks names the failed checks and accepts #12', async ($, on) => {
 
   const out = await $.command.run({ command: 'checks', args: '#12' })
   expect(out.text).toBe('#12 CI: FAILURE (lint, test)')
-  expect(prOf({ argv: runs[0] })).toBe('12')
+  expect(runs[0].args.pr).toBe('12')
 })
 
 test('every read-only command is a real subcommand', () => {
-  for (const name of READS) expect(Object.keys(POSITIONALS)).toContain(name)
+  for (const name of READS) expect(COMMANDS).toContain(name)
 })
 
 // answer: the label the stubbed dialog returns, or undefined for a dialog
