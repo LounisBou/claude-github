@@ -52,6 +52,17 @@ export const POSITIONALS: Record<string, string[]> = {
   'auth-check': [],
 }
 
+// The subcommands that only read. Every other one writes to GitHub, and a
+// command missing here is treated as a write, so the safe side is the default.
+export const READS = new Set([
+  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-diff', 'pr-files', 'pr-commits',
+  'file-at-ref', 'pr-threads', 'pr-comments', 'pr-issue-comments', 'pr-reviews',
+  'comment-resolved', 'comments-resolved-batch', 'review-pending', 'repo-review-comments',
+  'issue-view', 'issue-list', 'issue-search', 'pr-linked-issues', 'auth-check',
+])
+
+export const TOOL = 'mcp__github__gh'
+
 export class UsageError extends Error {}
 
 let fileSeq = 0
@@ -154,6 +165,31 @@ async function runGh($: any, command: string, args: Record<string, unknown> = {}
   return r.stdout
 }
 
+/*
+ * A tool.call hook that answers in place of next(e) skips core, and with it
+ * the permission check: settings rules and the mode would never be read. So
+ * the hook asks for the verdict itself. A deny refuses. An ask with no rule
+ * behind it lets a read through, as reading is what the tool is mostly for,
+ * and puts a write to the person. An ask from an explicit rule always asks.
+ * Where nobody can answer (a -p run) the ask rejects and the call is refused.
+ */
+async function permit($: any, e: any): Promise<string | undefined> {
+  const input = { command: e.command, args: e.args, repo: e.repo }
+  const verdict = await $.tool.check({ tool: TOOL, input })
+  if (verdict.decision === 'allow') return undefined
+  if (verdict.decision === 'deny') return verdict.reason || 'refused by a permission rule'
+  if (READS.has(e.command) && !verdict.rule) return undefined
+  const detail = JSON.stringify(e.args ?? {})
+  const question = 'Run gh ' + e.command + ' on ' + (e.repo || 'the origin repository') + ' with '
+    + (detail.length > 200 ? detail.slice(0, 199) + '…' : detail) + '?'
+  try {
+    if ((await $.ui.ask(question, ['Allow', 'Deny'])) === 'Allow') return undefined
+  } catch {
+    return 'gh ' + e.command + ' needs permission and nobody could be asked'
+  }
+  return 'the user refused gh ' + e.command
+}
+
 async function prText($: any, rawArgs: string, command: string, format: string): Promise<string> {
   const explicit = (rawArgs ?? '').trim()
   if (explicit) return runGh($, command, { pr: explicit, format })
@@ -245,15 +281,15 @@ export function register(on: any): void {
     return next(e)
   }).catch(async (_$: any, e: any, next: any) => next(e))
 
-  on('tool.call', { tool: 'mcp__github__gh' }, async ($: any, e: any) => {
+  on('tool.call', { tool: TOOL }, async ($: any, e: any) => {
+    const refused = await permit($, e)
+    if (refused) return { deny: refused }
     try {
       return { result: await runGh($, e.command, e.args ?? {}, e.repo) || '(no output)' }
     } catch (err: any) {
       return { result: String(err?.message ?? err), isError: true }
     }
-  }).catch(async (_$: any, _e: any, next: any) =>
-    ({ result: 'github mod error: the hook itself failed', isError: true }),
-  )
+  }).catch(async () => ({ deny: 'github mod error: the hook itself failed' }))
 
   on('command.run', { command: 'checks' }, async ($: any, e: any) => {
     try {

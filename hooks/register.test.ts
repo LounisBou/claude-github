@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { POSITIONALS, toArgv, UsageError } from './register.js'
+import { POSITIONALS, READS, toArgv, UsageError } from './register.js'
 
 test('session.start registers the gh tool and the three commands', async ($, on) => {
   const registered: string[] = []
@@ -98,8 +98,10 @@ async function stubMod(
   runs: any[],
   writes: any[],
   reply: any = { exitCode: 0, stdout: 'ok', stderr: '' },
+  verdict: any = { decision: 'allow' },
 ) {
   on('session.start', () => ({ cwd: '/work' }))
+  on('tool.check', () => verdict)
   on('tool.register', () => ({ value: undefined }))
   on('command.register', () => ({ value: undefined }))
   on('fs.write', (_$: any, e: any) => {
@@ -310,4 +312,91 @@ test('the pane with no open PRs says so and Refresh re-collects', async ($, on) 
   expect(await ui.find({ type: 'Text', text: /fix: related PRs/ })).toBeDefined()
   expect(runs.filter((a) => a[2] === 'pr-list').length).toBe(2)
   await ui.unmount()
+})
+
+test('every read-only command is a real subcommand', () => {
+  for (const name of READS) expect(Object.keys(POSITIONALS)).toContain(name)
+})
+
+// answer: the label the stubbed dialog returns, or undefined for a dialog
+// nobody can answer (a -p run).
+function stubAsk(on: any, asked: string[], answer: string | undefined) {
+  on('tool.call', { tool: 'AskUserQuestion' }, (_$: any, e: any) => {
+    const question = e.questions[0].question
+    asked.push(question)
+    if (answer === undefined) return { deny: 'no one to ask' }
+    return { result: { questions: e.questions, answers: { [question]: answer } } }
+  })
+}
+
+test('a deny verdict refuses the call without running gh.py', async ($, on) => {
+  const runs: any[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'deny', reason: 'denied by mcp__github__gh', rule: 'mcp__github__gh' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-list' })
+  expect(JSON.stringify(out)).toContain('denied by mcp__github__gh')
+  expect(out.result).toBeUndefined()
+  expect(runs.length).toBe(0)
+})
+
+test('an ask with no rule lets a read through without a dialog', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask' })
+  stubAsk(on, asked, 'Deny')
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-list' })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked.length).toBe(0)
+  expect(runs.length).toBe(1)
+})
+
+test('an ask puts a write to the person, and Allow runs it', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask' })
+  stubAsk(on, asked, 'Allow')
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-merge', args: { pr: 12 } })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked[0]).toContain('pr-merge')
+  expect(runs.length).toBe(1)
+})
+
+test('an ask on a write refused by the person runs nothing', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask' })
+  stubAsk(on, asked, 'Deny')
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'comment-delete', args: { comment_id: 5 } })
+  expect(JSON.stringify(out)).toContain('refused gh comment-delete')
+  expect(runs.length).toBe(0)
+})
+
+test('an ask from an explicit rule asks even for a read', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask', rule: 'mcp__github__gh' })
+  stubAsk(on, asked, 'Allow')
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-list' })
+  expect(asked.length).toBe(1)
+  expect(runs.length).toBe(1)
+})
+
+test('a write that needs permission is refused when nobody can be asked', async ($, on) => {
+  const runs: any[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask' })
+  stubAsk(on, [], undefined)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-comment', args: { pr: 1, body: 'x' } })
+  expect(JSON.stringify(out)).toContain('nobody could be asked')
+  expect(runs.length).toBe(0)
 })
