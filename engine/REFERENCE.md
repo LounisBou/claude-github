@@ -8,12 +8,18 @@ below, and the `args` object holds the subcommand's arguments.
 - Positional arguments go by their documented name: `pr-checks` → `{"pr": 12}`,
   `file-at-ref` → `{"path": "a.txt", "ref": "HEAD"}`. Variadic positionals
   (`label...`, `user...`, `term...`, `file...`) take an array.
-- Every other key becomes the same `--flag`: `{"branch": "x"}` → `--branch x`,
-  `{"format": "pr-number"}` → `--format pr-number`, `{"draft": true}` → `--draft`.
-- Text bodies go in `"body"` as a plain string — the mod writes the file and
-  passes `--body-file`; the bytes travel unchanged. Inline-comment arrays go in
-  `"comments"` (`--comments-file`), and `comments-resolved-batch` takes `"nodes"`
-  (an array of node ids).
+- Every other key must be one of the subcommand's own `--flag`s, spelled out
+  whole: `{"branch": "x"}` → `--branch x`, `{"format": "pr-number"}` →
+  `--format pr-number`, `{"draft": true}` → `--draft`. An unknown or abbreviated
+  key is refused.
+- Text bodies go in `"body"` as a plain string — gh.py writes it to a private
+  temporary file, passes `--body-file` and removes it afterwards; the bytes
+  travel unchanged. Inline-comment arrays go in `"comments"`
+  (`--comments-file`), and `comments-resolved-batch` takes `"nodes"` (an array
+  of node ids). `body-file`, `comments-file` and `json_file` are refused.
+
+The tool sends `{"command", "args", "repo"}` to `gh.py --stdin-json`, which
+builds the argument vector from its own parser.
 
 Example:
 

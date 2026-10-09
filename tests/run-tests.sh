@@ -1341,6 +1341,105 @@ PYREV
 check "every skill invocation names something real" "" "$phantom"
 
 
+echo "== stdin json =="
+
+F6="$WORK/fix6"; mkdir -p "$F6"
+gh6() { env GH_FIXTURES="$F6" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
+
+# argv6 <json>: the argument vector --stdin-json builds, without running it.
+argv6() {
+  printf '%s' "$1" | python3 -c "
+import json, sys, tempfile
+sys.path.insert(0, '$GHDIR')
+import gh
+from ghlib import errors, stdinjson
+with tempfile.TemporaryDirectory() as d:
+    try:
+        print(' '.join(stdinjson.build_argv(gh.build_parser(), json.load(sys.stdin), d)))
+    except errors.GhError as e:
+        print('error: ' + e.message)
+"
+}
+
+check "stdin json puts flags before -- and positionals after" \
+  "pr-checks --format=checks-status --repo=acme/thing -- 12" \
+  "$(argv6 '{"command":"pr-checks","args":{"format":"checks-status","pr":12},"repo":"acme/thing"}')"
+check "stdin json maps the mod's positional names onto argparse dests" \
+  "label-add -- 12 bug ui" \
+  "$(argv6 '{"command":"label-add","args":{"pr":12,"label":["bug","ui"]}}')"
+check "stdin json repeats append flags" \
+  "image-upload --title=B --title=A -- a.png b.png" \
+  "$(argv6 '{"command":"image-upload","args":{"file":["a.png","b.png"],"title":["B","A"]}}')"
+check "stdin json sets store_true flags" \
+  "pr-create --title=T --draft" \
+  "$(argv6 '{"command":"pr-create","args":{"title":"T","draft":true}}')"
+check "stdin json leaves out -- when there are no positionals" \
+  "pr-list" "$(argv6 '{"command":"pr-list"}')"
+check "stdin json refuses body-file" \
+  'error: "body-file" is managed by the engine; pass body, comments or nodes' \
+  "$(argv6 '{"command":"pr-comment","args":{"pr":7,"body-file":"/etc/hosts"}}')"
+check "stdin json refuses an abbreviated flag" \
+  'error: unknown argument "body-f" for pr-comment' \
+  "$(argv6 '{"command":"pr-comment","args":{"pr":7,"body-f":"/etc/hosts"}}')"
+check "stdin json refuses an array on a single positional" \
+  'error: "pr" takes a single value, not an array' \
+  "$(argv6 '{"command":"pr-update","args":{"pr":["7","--body-file=/etc/hosts"]}}')"
+check "stdin json refuses an unknown key" \
+  'error: unknown argument "nope" for pr-list' \
+  "$(argv6 '{"command":"pr-list","args":{"nope":1}}')"
+
+# A value shaped like a flag stays a value: after "--" for positionals, glued
+# to its flag for options.
+injected=$(printf '%s' '{"command":"label-add","args":{"pr":7,"label":["--body-file=/etc/hosts"]}}' | python3 -c "
+import json, sys, tempfile
+sys.path.insert(0, '$GHDIR')
+import gh
+from ghlib import stdinjson
+with tempfile.TemporaryDirectory() as d:
+    a = gh.build_parser().parse_args(stdinjson.build_argv(gh.build_parser(), json.load(sys.stdin), d))
+print(a.names[0])
+")
+check "a positional starting with -- is not read as a flag" "--body-file=/etc/hosts" "$injected"
+check "an option value starting with -- is not read as a flag" \
+  "pr-create --title=--draft" "$(argv6 '{"command":"pr-create","args":{"title":"--draft"}}')"
+
+# The body travels inside the JSON and must reach the API byte-identical.
+printf '%s' '{"id":99}' > "$F6/POST_repos_acme_thing_issues_7_comments.json"
+python3 -c "
+import json, sys
+print(json.dumps({'command': 'pr-comment', 'args': {'pr': 7, 'body': open(sys.argv[1], encoding='utf-8', newline='').read()}}))
+" "$BODY" | gh6 --stdin-json >/dev/null
+python3 -c "
+import json, sys
+for line in open('$F6/sent.jsonl'):
+    row = json.loads(line)
+    if row['path'].endswith('/issues/7/comments'):
+        sys.stdout.write(row['body']['body'])
+        break
+" > "$WORK/sent-body6.md"
+check_status "a stdin json body arrives byte-identical" 0 cmp -s "$BODY" "$WORK/sent-body6.md"
+
+check_status "stdin that is not JSON exits 1" 1 \
+  sh -c "printf 'nope' | env GH_FIXTURES='$F6' GH_TOKEN=x python3 '$GHDIR/gh.py' --stdin-json"
+
+# The mod's command enum is a static list; it must name exactly the engine's.
+enum_drift=$(python3 - "$GHDIR" "$ROOT/hooks/register.ts" <<'PYENUM'
+import re, sys
+sys.path.insert(0, sys.argv[1])
+import gh
+subs = set([a for a in gh.build_parser()._actions if a.dest == "command"][0].choices)
+src = open(sys.argv[2], encoding="utf-8").read()
+if "export const COMMANDS = [" not in src:
+    print("no COMMANDS list in register.ts")
+    sys.exit()
+block = src.split("export const COMMANDS = [", 1)[1].split("]", 1)[0]
+names = set(re.findall(r"'([a-z-]+)'", block))
+print(" ".join(sorted(subs ^ names)))
+PYENUM
+)
+check "the mod's COMMANDS match the engine's subcommands" "" "$enum_drift"
+
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

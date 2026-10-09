@@ -7,12 +7,14 @@ argument reliably.
 """
 
 import argparse
+import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ghlib import assets, comments, errors, fmt, issues, meta, pending, pr, repo, reviews  # noqa: E402
+from ghlib import assets, comments, errors, fmt, issues, meta, pending, pr, repo, reviews, stdinjson  # noqa: E402
 
 _MODULES = (pr, comments, reviews, meta, pending, issues, assets)
 
@@ -53,7 +55,26 @@ def build_parser():
     return parser
 
 
+def main_stdin_json():
+    """Read {"command", "args", "repo"} on stdin and run it, with the bodies it
+    carries written to a private directory removed once the command ends."""
+    try:
+        request = json.loads(sys.stdin.read())
+    except ValueError as exc:
+        print("error: stdin is not valid JSON: %s" % exc, file=sys.stderr)
+        return errors.UsageError.code
+    with tempfile.TemporaryDirectory(prefix="claude-github-") as tmpdir:
+        try:
+            argv = stdinjson.build_argv(build_parser(), request, tmpdir)
+        except errors.GhError as exc:
+            print("error: " + exc.message, file=sys.stderr)
+            return exc.code
+        return main(argv)
+
+
 def main(argv):
+    if argv == ["--stdin-json"]:
+        return main_stdin_json()
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
