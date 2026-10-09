@@ -1,6 +1,6 @@
 {
   "name": "github",
-  "description": "GitHub API from the standard library: pull requests, review threads, comments, reviews, labels, issues, search and image attachments, without the gh CLI.",
+  "description": "GitHub API from a native Claude Code tool: pull requests, review threads, comments, reviews, labels, issues, search and image attachments, facading a Python stdlib engine.",
   "version": "0.3.0",
   "author": {
     "name": "Lounis Bou",
