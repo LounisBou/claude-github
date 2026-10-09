@@ -34,11 +34,19 @@ test('toArgv routes body and comments through temp files', () => {
   expect(argv).toContain('--body-file')
   expect(files.length).toBe(1)
   expect(files[0].text).toBe('hi\r\n`code` $VAR')
-  expect(files[0].path).toMatch(/^\/tmp\/claude-github-body-\d+\.md$/)
+  expect(files[0].path).toMatch(/^\/tmp\/claude-github-body-[a-z0-9]{6}-\d+\.md$/)
 
   const r2 = toArgv('review-submit', { pr: 7, event: 'APPROVE', comments: [{ path: 'a.py', line: 3, body: 'x' }] })
   expect(r2.argv).toContain('--comments-file')
   expect(r2.files[0].text).toBe(JSON.stringify([{ path: 'a.py', line: 3, body: 'x' }]))
+})
+
+test('temp file paths carry a per-load unique segment so sessions cannot collide', () => {
+  const a = toArgv('pr-comment', { pr: 1, body: 'x' })
+  const b = toArgv('pr-comment', { pr: 2, body: 'y' })
+  const paths = [...a.files, ...b.files].map((f) => f.path)
+  for (const p of paths) expect(p).toMatch(/^\/tmp\/claude-github-body-[a-z0-9]{6}-\d+\.md$/)
+  expect(new Set(paths).size).toBe(2)
 })
 
 test('toArgv handles variadic positionals, repeated flags and booleans', () => {

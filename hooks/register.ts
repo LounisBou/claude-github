@@ -56,9 +56,13 @@ export class UsageError extends Error {}
 
 let fileSeq = 0
 
+// Random per module load: two concurrent Claude sessions otherwise write the
+// same /tmp paths and can post each other's bodies.
+const loadId = (Math.random().toString(36) + '000000').slice(2, 8)
+
 function tmpPath(kind: string, ext: string): string {
   fileSeq += 1
-  return '/tmp/claude-github-' + kind + '-' + fileSeq + ext
+  return '/tmp/claude-github-' + kind + '-' + loadId + '-' + fileSeq + ext
 }
 
 function strings(key: string, value: unknown): string[] {
