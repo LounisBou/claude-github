@@ -185,6 +185,10 @@ async function collectRows($: any): Promise<void> {
   paneRows = rows
 }
 
+function clip(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max - 1) + '…' : text
+}
+
 export function register(on: any): void {
   on('session.start', async ($: any, e: any, next: any) => {
     const root = $.plugin.root
@@ -248,4 +252,45 @@ export function register(on: any): void {
     await $.ui.open({ id: PANE_ID, title: 'PRs', closeOnEscape: true })
     return {}
   }).catch(async () => ({ text: 'github mod: /prs failed; run /github:doctor for diagnostics' }))
+
+  on('ui.render', { component: 'Pane' }, async ($: any, e: any, next: any) => {
+    if (e.requestId !== PANE_ID) return next(e)
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
+    const width = e.props?.bodyColumns ?? 80
+    const rows = paneRows.length === 0
+      ? [Text({ children: ['No open PRs'] })]
+      : paneRows.map((r) =>
+          Box({
+            key: 'pr-' + r.number,
+            flexDirection: 'row',
+            columnGap: 1,
+            children: [
+              Link({ key: 'link-' + r.number, href: r.url, label: '#' + r.number }),
+              Text(
+                { color: ciColor(r.ci), children: [
+                  clip(r.title, width - 28)
+                  + (r.draft ? ' ○ draft' : '')
+                  + ' CI:' + r.ci
+                  + (r.comments > 0 ? ' 💬' + r.comments : ''),
+                ] },
+              ),
+            ],
+          }),
+        )
+    return Box({
+      key: 'prs',
+      flexDirection: 'column',
+      children: [
+        ...rows,
+        Button({
+          key: 'refresh',
+          label: 'Refresh',
+          onPress: async () => {
+            await collectRows($)
+            $.ui.invalidate('ui.render')
+          },
+        }),
+      ],
+    })
+  }).catch(async (_$: any, e: any, next: any) => next(e))
 }

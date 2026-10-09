@@ -216,3 +216,59 @@ test('/prs collects the first five PRs with CI and opens the pane', async ($, on
   expect(runs[1][2]).toBe('pr-checks')
   expect(runs[1]).toContain('12')
 })
+
+const PANE_EVENT = {
+  plugin: 'github',
+  component: 'Pane',
+  requestId: 'github-prs',
+  surface: 'terminal',
+  viewport: { columns: 100, rows: 30 },
+  props: {
+    title: 'PRs',
+    isFocused: true,
+    bodyColumns: 60,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 10 },
+    view: {},
+  },
+} as const
+
+test('the pane renders one row per PR with CI colour and a refresh button', async ($, on) => {
+  const runs: any[] = []
+  let call = 0
+  await stubMod(on, runs, [], () =>
+    (call += 1) === 1
+      ? { exitCode: 0, stdout: PR_LIST, stderr: '' }
+      : { exitCode: 0, stdout: JSON.stringify({ result: 'FAILURE' }), stderr: '' },
+  )
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.command.run({ command: 'prs', args: '' })
+
+  const ui = await $.ui.mount({ ...PANE_EVENT })
+  expect(await ui.find({ type: 'Link', props: { href: 'https://github.com/acme/thing/pull/12' } })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /fix: related PRs/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /CI:FAILURE/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /draft/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'refresh' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the pane with no open PRs says so and Refresh re-collects', async ($, on) => {
+  const runs: any[] = []
+  let call = 0
+  await stubMod(on, runs, [], () => ({
+    exitCode: 0,
+    stdout: (call += 1) === 1 ? '[]' : PR_LIST,
+    stderr: '',
+  }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.command.run({ command: 'prs', args: '' })
+
+  const ui = await $.ui.mount({ ...PANE_EVENT })
+  expect(await ui.find({ type: 'Text', text: /No open PRs/ })).toBeDefined()
+
+  await ui.press({ key: 'refresh' }) // stub now returns PR_LIST
+  expect(await ui.find({ type: 'Text', text: /fix: related PRs/ })).toBeDefined()
+  expect(runs.filter((a) => a[2] === 'pr-list').length).toBe(2)
+  await ui.unmount()
+})
