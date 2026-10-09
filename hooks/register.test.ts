@@ -186,3 +186,33 @@ test('/threads with an explicit PR skips the lookup', async ($, on) => {
   expect(runs.length).toBe(1)
   expect(runs[0][2]).toBe('pr-threads')
 })
+
+const PR_LIST = JSON.stringify([
+  { number: 12, title: 'fix: related PRs', html_url: 'https://github.com/acme/thing/pull/12', draft: false, comments: 2, review_comments: 1 },
+  { number: 11, title: 'feat: minimize nodes', html_url: 'https://github.com/acme/thing/pull/11', draft: true, comments: 0, review_comments: 0 },
+])
+
+test('/prs collects the first five PRs with CI and opens the pane', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  // Sequenced reply: pr-list first, then pr-checks for each PR.
+  let call = 0
+  await stubMod(on, runs, writes, () =>
+    (call += 1) === 1
+      ? { exitCode: 0, stdout: PR_LIST, stderr: '' }
+      : { exitCode: 0, stdout: JSON.stringify({ result: 'SUCCESS' }), stderr: '' },
+  )
+  const opened: any[] = []
+  on('ui.open', (_$: any, e: any) => {
+    opened.push(e)
+    return { value: { isPlaced: true } }
+  })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.command.run({ command: 'prs', args: '' })
+  expect(out).toEqual({})
+  expect(opened).toEqual([{ id: 'github-prs', title: 'PRs', closeOnEscape: true }])
+  expect(runs.length).toBe(3) // pr-list + pr-checks × 2
+  expect(runs[1][2]).toBe('pr-checks')
+  expect(runs[1]).toContain('12')
+})

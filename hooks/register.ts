@@ -146,6 +146,45 @@ async function prText($: any, rawArgs: string, command: string, format: string):
   return runGh($, command, { pr: current, format })
 }
 
+export type PaneRow = {
+  number: number
+  title: string
+  url: string
+  draft: boolean
+  comments: number
+  ci: string
+}
+
+let paneRows: PaneRow[] = []
+
+function ciColor(ci: string): string {
+  if (ci === 'SUCCESS') return 'green'
+  if (ci === 'FAILURE') return 'red'
+  return 'yellow'
+}
+
+async function collectRows($: any): Promise<void> {
+  const prs = JSON.parse(await runGh($, 'pr-list')) as any[]
+  const rows: PaneRow[] = []
+  for (const p of prs.slice(0, 5)) {
+    let ci = 'PENDING'
+    try {
+      ci = String(JSON.parse(await runGh($, 'pr-checks', { pr: String(p.number), format: 'checks-status' })).result)
+    } catch {
+      // Leave the row at PENDING rather than dropping the PR.
+    }
+    rows.push({
+      number: p.number,
+      title: String(p.title ?? ''),
+      url: String(p.html_url ?? ''),
+      draft: Boolean(p.draft),
+      comments: (p.comments ?? 0) + (p.review_comments ?? 0),
+      ci,
+    })
+  }
+  paneRows = rows
+}
+
 export function register(on: any): void {
   on('session.start', async ($: any, e: any, next: any) => {
     const root = $.plugin.root
@@ -203,4 +242,10 @@ export function register(on: any): void {
   on('command.run', { command: 'threads' }, async ($: any, e: any) => {
     return { text: await prText($, e.args, 'pr-threads', 'thread-summary') }
   }).catch(async () => ({ text: 'github mod: /threads failed; run /github:doctor for diagnostics' }))
+
+  on('command.run', { command: 'prs' }, async ($: any, _e: any) => {
+    await collectRows($)
+    await $.ui.open({ id: PANE_ID, title: 'PRs', closeOnEscape: true })
+    return {}
+  }).catch(async () => ({ text: 'github mod: /prs failed; run /github:doctor for diagnostics' }))
 }
