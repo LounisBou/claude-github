@@ -236,22 +236,34 @@ export function register(on: any): void {
       return { result: String(err?.message ?? err), isError: true }
     }
   }).catch(async (_$: any, _e: any, next: any) =>
-    ({ result: 'github mod error: the hook failed; run /github:doctor for diagnostics', isError: true }),
+    ({ result: 'github mod error: the hook itself failed', isError: true }),
   )
 
   on('command.run', { command: 'checks' }, async ($: any, e: any) => {
-    return { text: await prText($, e.args, 'pr-checks', 'checks-status') }
-  }).catch(async () => ({ text: 'github mod: /checks failed; run /github:doctor for diagnostics' }))
+    try {
+      return { text: await prText($, e.args, 'pr-checks', 'checks-status') }
+    } catch (err: any) {
+      return { text: String(err?.message ?? err) }
+    }
+  }).catch(async () => ({ text: 'github mod: /checks failed; the mod itself errored' }))
 
   on('command.run', { command: 'threads' }, async ($: any, e: any) => {
-    return { text: await prText($, e.args, 'pr-threads', 'thread-summary') }
-  }).catch(async () => ({ text: 'github mod: /threads failed; run /github:doctor for diagnostics' }))
+    try {
+      return { text: await prText($, e.args, 'pr-threads', 'thread-summary') }
+    } catch (err: any) {
+      return { text: String(err?.message ?? err) }
+    }
+  }).catch(async () => ({ text: 'github mod: /threads failed; the mod itself errored' }))
 
   on('command.run', { command: 'prs' }, async ($: any, _e: any) => {
-    await collectRows($)
-    await $.ui.open({ id: PANE_ID, title: 'PRs', closeOnEscape: true })
-    return {}
-  }).catch(async () => ({ text: 'github mod: /prs failed; run /github:doctor for diagnostics' }))
+    try {
+      await collectRows($)
+      await $.ui.open({ id: PANE_ID, title: 'PRs', closeOnEscape: true })
+      return {}
+    } catch (err: any) {
+      return { text: String(err?.message ?? err) }
+    }
+  }).catch(async () => ({ text: 'github mod: /prs failed; the mod itself errored' }))
 
   on('ui.render', { component: 'Pane' }, async ($: any, e: any, next: any) => {
     if (e.requestId !== PANE_ID) return next(e)

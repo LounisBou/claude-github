@@ -187,6 +187,20 @@ test('/threads with an explicit PR skips the lookup', async ($, on) => {
   expect(runs[0][2]).toBe('pr-threads')
 })
 
+test('command failures surface the engine error, not a generic diagnostics line', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  await stubMod(on, runs, writes, { exitCode: 4, stdout: '', stderr: 'error: no PR 999' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const checks = await $.command.run({ command: 'checks', args: '999' })
+  expect(checks.text).toBe('error: no PR 999')
+  const threads = await $.command.run({ command: 'threads', args: '999' })
+  expect(threads.text).toBe('error: no PR 999')
+  const prs = await $.command.run({ command: 'prs', args: '' })
+  expect(prs.text).toBe('error: no PR 999')
+})
+
 const PR_LIST = JSON.stringify([
   { number: 12, title: 'fix: related PRs', html_url: 'https://github.com/acme/thing/pull/12', draft: false, comments: 2, review_comments: 1 },
   { number: 11, title: 'feat: minimize nodes', html_url: 'https://github.com/acme/thing/pull/11', draft: true, comments: 0, review_comments: 0 },
