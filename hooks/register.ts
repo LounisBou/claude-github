@@ -65,6 +65,8 @@ function tmpPath(kind: string, ext: string): string {
   return '/tmp/claude-github-' + kind + '-' + loadId + '-' + fileSeq + ext
 }
 
+const FLAG_KEY = /^[a-z][a-z0-9-]*$/
+
 function strings(key: string, value: unknown): string[] {
   if (Array.isArray(value)) {
     if (value.some((v) => typeof v === 'object' || v === null)) {
@@ -90,47 +92,54 @@ export function toArgv(
 
   for (const [key, value] of Object.entries(args ?? {})) {
     if (value === undefined || value === null) continue
+    if (!FLAG_KEY.test(key)) throw new UsageError('invalid argument name: ' + JSON.stringify(key))
     if (key === 'body-file' || key === 'comments-file') {
       throw new UsageError('"' + key + '" is managed by the mod; pass body or comments instead')
     }
-    const isPositional = positionals.some((p) => p === key || p === key + '...')
+    const isVariadic = positionals.includes(key + '...')
+    const isPositional = isVariadic || positionals.includes(key)
     if (key === 'body') {
       if (typeof value !== 'string') throw new UsageError('body must be a string')
       const path = tmpPath('body', '.md')
       files.push({ path, text: value })
-      flags.push('--body-file', path)
+      flags.push('--body-file=' + path)
     } else if (key === 'comments') {
       if (!Array.isArray(value)) throw new UsageError('comments must be an array')
       const path = tmpPath('comments', '.json')
       files.push({ path, text: JSON.stringify(value) })
-      flags.push('--comments-file', path)
+      flags.push('--comments-file=' + path)
     } else if (isPositional && key === 'nodes') {
       if (!Array.isArray(value)) throw new UsageError('nodes must be an array')
       const path = tmpPath('nodes', '.json')
       files.push({ path, text: JSON.stringify(value) })
       byName[key] = [path]
     } else if (isPositional) {
+      if (!isVariadic && Array.isArray(value)) throw new UsageError('"' + key + '" takes a single value')
       byName[key] = strings(key, value)
     } else if (typeof value === 'boolean') {
       if (value) flags.push('--' + key)
     } else if (typeof value === 'string' || typeof value === 'number') {
-      flags.push('--' + key, String(value))
+      flags.push('--' + key + '=' + String(value))
     } else if (Array.isArray(value)) {
-      for (const v of strings(key, value)) flags.push('--' + key, v)
+      for (const v of strings(key, value)) flags.push('--' + key + '=' + v)
     } else {
       throw new UsageError('unsupported value for "' + key + '"')
     }
   }
 
-  const argv: string[] = []
+  // Flags carry their value after "=", and positionals come after "--", so no
+  // value the model passes can be read as a flag: "--body-file=/etc/hosts" as
+  // a PR number stays a (rejected) PR number.
+  const argv: string[] = [...flags]
+  if (repo) argv.push('--repo=' + repo)
+  const values: string[] = []
   for (const slot of positionals) {
     const bare = slot.replace(/\.\.\.$/, '')
     const got = byName[bare]
     if (!got || got.length === 0) throw new UsageError('missing argument "' + bare + '" for ' + command)
-    argv.push(...got)
+    values.push(...got)
   }
-  argv.push(...flags)
-  if (repo) argv.push('--repo', repo)
+  if (values.length > 0) argv.push('--', ...values)
   return { argv, files }
 }
 

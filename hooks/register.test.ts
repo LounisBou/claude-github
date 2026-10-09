@@ -22,22 +22,22 @@ test('session.start registers the gh tool and the three commands', async ($, on)
   expect(registered).toContain('cmd:prs')
 })
 
-test('toArgv puts named positionals first, then flags, then --repo', () => {
+test('toArgv puts flags first, then --repo, then the positionals after --', () => {
   const { argv, files } = toArgv('pr-checks', { format: 'checks-status', pr: 12 }, 'acme/thing')
-  expect(argv).toEqual(['12', '--format', 'checks-status', '--repo', 'acme/thing'])
+  expect(argv).toEqual(['--format=checks-status', '--repo=acme/thing', '--', '12'])
   expect(files).toEqual([])
 })
 
 test('toArgv routes body and comments through temp files', () => {
   const { argv, files } = toArgv('pr-comment', { pr: 7, body: 'hi\r\n`code` $VAR' })
-  expect(argv[0]).toBe('7')
-  expect(argv).toContain('--body-file')
+  expect(argv[argv.length - 1]).toBe('7')
+  expect(argv[0]).toBe('--body-file=' + files[0].path)
   expect(files.length).toBe(1)
   expect(files[0].text).toBe('hi\r\n`code` $VAR')
   expect(files[0].path).toMatch(/^\/tmp\/claude-github-body-[a-z0-9]{6}-\d+\.md$/)
 
   const r2 = toArgv('review-submit', { pr: 7, event: 'APPROVE', comments: [{ path: 'a.py', line: 3, body: 'x' }] })
-  expect(r2.argv).toContain('--comments-file')
+  expect(r2.argv).toContain('--comments-file=' + r2.files[0].path)
   expect(r2.files[0].text).toBe(JSON.stringify([{ path: 'a.py', line: 3, body: 'x' }]))
 })
 
@@ -51,16 +51,16 @@ test('temp file paths carry a per-load unique segment so sessions cannot collide
 
 test('toArgv handles variadic positionals, repeated flags and booleans', () => {
   const { argv } = toArgv('label-add', { pr: 12, label: ['bug', 'ui'] })
-  expect(argv).toEqual(['12', 'bug', 'ui'])
+  expect(argv).toEqual(['--', '12', 'bug', 'ui'])
   const img = toArgv('image-upload', { file: ['a.png', 'b.png'], title: ['Before', 'After'] })
-  expect(img.argv).toEqual(['a.png', 'b.png', '--title', 'Before', '--title', 'After'])
+  expect(img.argv).toEqual(['--title=Before', '--title=After', '--', 'a.png', 'b.png'])
   const draft = toArgv('pr-create', { title: 'T', draft: true, base: false })
-  expect(draft.argv).toEqual(['--title', 'T', '--draft'])
+  expect(draft.argv).toEqual(['--title=T', '--draft'])
 })
 
 test('toArgv serializes nodes for comments-resolved-batch', () => {
   const { argv, files } = toArgv('comments-resolved-batch', { nodes: ['IC_1', 'IC_2'] })
-  expect(argv).toEqual([files[0].path])
+  expect(argv).toEqual(['--', files[0].path])
   expect(files[0].text).toBe(JSON.stringify(['IC_1', 'IC_2']))
 })
 
@@ -74,6 +74,20 @@ test('toArgv rejects unknown commands, missing positionals and bad values', () =
 test('mod-managed flags cannot be overridden from args', () => {
   expect(() => toArgv('pr-comment', { pr: 1, 'body-file': '/etc/passwd' })).toThrow(UsageError)
   expect(() => toArgv('review-submit', { pr: 1, 'comments-file': '/tmp/x.json' })).toThrow(UsageError)
+})
+
+test('no value can smuggle a flag into argv', () => {
+  // A single positional given as an array would splice extra argv entries.
+  expect(() => toArgv('pr-update', { pr: ['12', '--body-file=/etc/hosts'] })).toThrow(UsageError)
+  // A positional value that looks like a flag stays after "--".
+  const pos = toArgv('pr-status', { pr: '--body-file=/etc/hosts' })
+  expect(pos.argv).toEqual(['--', '--body-file=/etc/hosts'])
+  // A flag value that looks like a flag stays glued to its own flag.
+  const flag = toArgv('pr-create', { title: '--draft' })
+  expect(flag.argv).toEqual(['--title=--draft'])
+  // Keys are plain flag names only.
+  expect(() => toArgv('pr-comment', { pr: 1, body: 'x', 'x --body-file': 'y' })).toThrow(UsageError)
+  expect(() => toArgv('pr-comment', { pr: 1, body: 'x', '-body-file': 'y' })).toThrow(UsageError)
 })
 
 // reply: a fixed { exitCode, stdout, stderr } value, or a function (e) => value
@@ -118,11 +132,9 @@ test('the gh tool runs gh.py with the mapped argv and preserves body bytes', asy
   expect(argv[0]).toBe('python3')
   expect(argv[1].endsWith('/engine/gh.py')).toBe(true)
   expect(argv[2]).toBe('pr-comment')
-  expect(argv[3]).toBe('12')
-  const i = argv.indexOf('--body-file')
-  expect(i).toBeGreaterThan(-1)
-  expect(argv[i + 1]).toBe(writes[0].path)
-  expect(argv[argv.length - 2]).toBe('--repo')
+  expect(argv).toContain('--body-file=' + writes[0].path)
+  expect(argv).toContain('--repo=acme/thing')
+  expect(argv.slice(-2)).toEqual(['--', '12'])
 })
 
 test('a non-zero gh.py exit returns isError with stderr', async ($, on) => {

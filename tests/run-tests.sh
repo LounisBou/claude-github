@@ -422,6 +422,9 @@ check_status "body-file arrives byte-identical" 0 cmp -s "$BODY" "$WORK/sent-bod
 check_status "a missing body file exits 1" 1 gh3 pr-comment 7 --body-file "$WORK/nope.md"
 check_status "an abbreviated --body-file is refused as a usage error" 1 gh3 pr-comment 7 --body-f "$BODY"
 check_status "an abbreviated flag is refused on every subcommand" 1 gh3 pr-merge 7 --meth squash
+# The mod's argv shape: flags as --key=value first, positionals after "--".
+check_status "the mod's argv shape posts a comment" 0 gh3 pr-comment --body-file="$BODY" --repo=acme/thing -- 7
+check_status "a flag-looking positional after -- is not read as a flag" 1 gh3 pr-comment --body-file="$BODY" -- --body-file=/etc/hosts
 check_status "an empty body file exits 1" 1 sh -c ": > '$WORK/empty.md'; $(printf '%q ' env GH_FIXTURES="$F3" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py") pr-comment 7 --body-file '$WORK/empty.md'"
 
 echo "== review writes =="
