@@ -114,7 +114,7 @@ check_status "no plugins enabled still exits 0" 0 \
 
 echo "== http transport =="
 
-GHDIR="$ROOT/skills/github-curl"
+GHDIR="$ROOT/engine"
 FIX="$WORK/fix"; mkdir -p "$FIX"
 
 printf '%s' '{"number":42,"title":"A title"}' > "$FIX/GET_repos_acme_thing_pulls_42.json"
@@ -420,6 +420,11 @@ for line in open('$F3/sent.jsonl'):
 check_status "body-file arrives byte-identical" 0 cmp -s "$BODY" "$WORK/sent-body.md"
 
 check_status "a missing body file exits 1" 1 gh3 pr-comment 7 --body-file "$WORK/nope.md"
+check_status "an abbreviated --body-file is refused as a usage error" 1 gh3 pr-comment 7 --body-f "$BODY"
+check_status "an abbreviated flag is refused on every subcommand" 1 gh3 pr-merge 7 --meth squash
+# The mod's argv shape: flags as --key=value first, positionals after "--".
+check_status "the mod's argv shape posts a comment" 0 gh3 pr-comment --body-file="$BODY" --repo=acme/thing -- 7
+check_status "a flag-looking positional after -- is not read as a flag" 1 gh3 pr-comment --body-file="$BODY" -- --body-file=/etc/hosts
 check_status "an empty body file exits 1" 1 sh -c ": > '$WORK/empty.md'; $(printf '%q ' env GH_FIXTURES="$F3" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py") pr-comment 7 --body-file '$WORK/empty.md'"
 
 echo "== review writes =="
@@ -902,7 +907,7 @@ check "a status read that fails with a 422 does not end the wait" "abc" "$status
 
 echo "== skill documents =="
 
-SKILLDOC="$ROOT/skills/github-curl/SKILL.md"
+SKILLDOC="$ROOT/engine/REFERENCE.md"
 
 echo "== pending reviews =="
 
@@ -1061,13 +1066,13 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.3.0" \
+check "manifest version" "0.4.0" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.3.0 0.3.0" \
+check "marketplace version matches" "0.4.0 0.4.0" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
-  check "SKILL.md documents '$needle'" "1" \
+  check "REFERENCE.md documents '$needle'" "1" \
     "$(grep -qF -- "$needle" "$SKILLDOC" && echo 1 || echo 0)"
 done
 
@@ -1098,13 +1103,27 @@ PYFMT
 check "every formatter is documented" "" "$undocumented_formats"
 
 # No relative .claude/skills path may survive the move into a plugin.
-stale=$(grep -rn '\.claude/skills/' "$ROOT/skills" 2>/dev/null || true)
+stale=$(grep -rn '\.claude/skills/' "$ROOT/engine" 2>/dev/null || true)
 check "no relative skill paths" "" "$stale"
 
 
+echo "== fallback skill =="
+
+# Plugins built on earlier releases run skills/github-curl/gh.py: it must keep
+# behaving as the engine itself, output and exit codes alike.
+SHIM="$ROOT/skills/github-curl/gh.py"
+check "the former entry point runs the engine" "someone" \
+  "$(env GH_FIXTURES="$F2" GH_TOKEN=x GH_REPO=acme/thing python3 "$SHIM" auth-check --format login)"
+check_status "the former entry point keeps the engine's exit codes" 1 \
+  env GH_FIXTURES="$F2" GH_TOKEN=x GH_REPO=acme/thing python3 "$SHIM" pr-comment 7 --body-file "$WORK/nope.md"
+check "the fallback skill points at the engine" "1" \
+  "$(grep -cF '${CLAUDE_PLUGIN_ROOT}/engine/gh.py' "$ROOT/skills/github-curl/SKILL.md")"
+check "the fallback skill defers to the native tool" "1" \
+  "$(grep -qF 'mcp__github__gh' "$ROOT/skills/github-curl/SKILL.md" && echo 1 || echo 0)"
+
 echo "== writing rules =="
 
-WRITINGDOC="$ROOT/skills/github-curl/WRITING.md"
+WRITINGDOC="$ROOT/engine/WRITING.md"
 
 check "WRITING.md exists" "yes" "$([ -f "$WRITINGDOC" ] && echo yes || echo no)"
 
@@ -1131,8 +1150,8 @@ check "WRITING.md headings are in order" \
   "Commit messages | Pull request titles | Pull request descriptions | Review comments" \
   "$headings"
 
-check "SKILL.md names a Writing rules section" "1" \
-  "$(grep -c '^## Writing rules' "$SKILLDOC")"
+check "REFERENCE.md points at WRITING.md" "1" \
+  "$(grep -cF 'read `WRITING.md` beside this file' "$SKILLDOC")"
 
 for needle in '--draft' '**TODO Staging:**' '**TODO Prod:**' '**PRs Dependency:**' '**Related PRs:**' 'one `- ` bullet per item' 'follow-up' 'mandatory' 'kept apart' 'no semicolon' 'never edited without' 'heading'; do
   check "WRITING.md mentions '$needle'" "1" \
@@ -1307,19 +1326,118 @@ from ghlib import fmt
 subs = set([a for a in gh.build_parser()._actions if a.dest == "command"][0].choices)
 fmts = set(fmt._FORMATTERS)
 bad = []
-for name in ("github-curl",):
-    path = os.path.join(sys.argv[2], "skills", name, "SKILL.md")
-    for i, line in enumerate(open(path, encoding="utf-8"), 1):
-        m = re.search(r'python3\s+"\$GH"\s+([a-z][a-z0-9-]+)', line)
-        if m and m.group(1) not in subs:
-            bad.append("%s:%d subcommand %s" % (name, i, m.group(1)))
-        for f in re.finditer(r'--format\s+([a-z][a-z0-9-]+)', line):
-            if f.group(1) not in fmts:
-                bad.append("%s:%d format %s" % (name, i, f.group(1)))
+name = "REFERENCE.md"
+path = os.path.join(sys.argv[2], "engine", name)
+for i, line in enumerate(open(path, encoding="utf-8"), 1):
+    m = re.search(r'python3\s+"\$GH"\s+([a-z][a-z0-9-]+)', line)
+    if m and m.group(1) not in subs:
+        bad.append("%s:%d subcommand %s" % (name, i, m.group(1)))
+    for f in re.finditer(r'--format\s+([a-z][a-z0-9-]+)', line):
+        if f.group(1) not in fmts:
+            bad.append("%s:%d format %s" % (name, i, f.group(1)))
 print(" ".join(bad))
 PYREV
 )
 check "every skill invocation names something real" "" "$phantom"
+
+
+echo "== stdin json =="
+
+F6="$WORK/fix6"; mkdir -p "$F6"
+gh6() { env GH_FIXTURES="$F6" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
+
+# argv6 <json>: the argument vector --stdin-json builds, without running it.
+argv6() {
+  printf '%s' "$1" | python3 -c "
+import json, sys, tempfile
+sys.path.insert(0, '$GHDIR')
+import gh
+from ghlib import errors, stdinjson
+with tempfile.TemporaryDirectory() as d:
+    try:
+        print(' '.join(stdinjson.build_argv(gh.build_parser(), json.load(sys.stdin), d)))
+    except errors.GhError as e:
+        print('error: ' + e.message)
+"
+}
+
+check "stdin json puts flags before -- and positionals after" \
+  "pr-checks --format=checks-status --repo=acme/thing -- 12" \
+  "$(argv6 '{"command":"pr-checks","args":{"format":"checks-status","pr":12},"repo":"acme/thing"}')"
+check "stdin json maps the mod's positional names onto argparse dests" \
+  "label-add -- 12 bug ui" \
+  "$(argv6 '{"command":"label-add","args":{"pr":12,"label":["bug","ui"]}}')"
+check "stdin json repeats append flags" \
+  "image-upload --title=B --title=A -- a.png b.png" \
+  "$(argv6 '{"command":"image-upload","args":{"file":["a.png","b.png"],"title":["B","A"]}}')"
+check "stdin json sets store_true flags" \
+  "pr-create --title=T --draft" \
+  "$(argv6 '{"command":"pr-create","args":{"title":"T","draft":true}}')"
+check "stdin json leaves out -- when there are no positionals" \
+  "pr-list" "$(argv6 '{"command":"pr-list"}')"
+check "stdin json refuses body-file" \
+  'error: "body-file" is managed by the engine; pass body, comments or nodes' \
+  "$(argv6 '{"command":"pr-comment","args":{"pr":7,"body-file":"/etc/hosts"}}')"
+check "stdin json refuses an abbreviated flag" \
+  'error: unknown argument "body-f" for pr-comment' \
+  "$(argv6 '{"command":"pr-comment","args":{"pr":7,"body-f":"/etc/hosts"}}')"
+check "stdin json refuses an array on a single positional" \
+  'error: "pr" takes a single value, not an array' \
+  "$(argv6 '{"command":"pr-update","args":{"pr":["7","--body-file=/etc/hosts"]}}')"
+check "stdin json refuses an unknown key" \
+  'error: unknown argument "nope" for pr-list' \
+  "$(argv6 '{"command":"pr-list","args":{"nope":1}}')"
+
+# A value shaped like a flag stays a value: after "--" for positionals, glued
+# to its flag for options.
+injected=$(printf '%s' '{"command":"label-add","args":{"pr":7,"label":["--body-file=/etc/hosts"]}}' | python3 -c "
+import json, sys, tempfile
+sys.path.insert(0, '$GHDIR')
+import gh
+from ghlib import stdinjson
+with tempfile.TemporaryDirectory() as d:
+    a = gh.build_parser().parse_args(stdinjson.build_argv(gh.build_parser(), json.load(sys.stdin), d))
+print(a.names[0])
+")
+check "a positional starting with -- is not read as a flag" "--body-file=/etc/hosts" "$injected"
+check "an option value starting with -- is not read as a flag" \
+  "pr-create --title=--draft" "$(argv6 '{"command":"pr-create","args":{"title":"--draft"}}')"
+
+# The body travels inside the JSON and must reach the API byte-identical.
+printf '%s' '{"id":99}' > "$F6/POST_repos_acme_thing_issues_7_comments.json"
+python3 -c "
+import json, sys
+print(json.dumps({'command': 'pr-comment', 'args': {'pr': 7, 'body': open(sys.argv[1], encoding='utf-8', newline='').read()}}))
+" "$BODY" | gh6 --stdin-json >/dev/null
+python3 -c "
+import json, sys
+for line in open('$F6/sent.jsonl'):
+    row = json.loads(line)
+    if row['path'].endswith('/issues/7/comments'):
+        sys.stdout.write(row['body']['body'])
+        break
+" > "$WORK/sent-body6.md"
+check_status "a stdin json body arrives byte-identical" 0 cmp -s "$BODY" "$WORK/sent-body6.md"
+
+check_status "stdin that is not JSON exits 1" 1 \
+  sh -c "printf 'nope' | env GH_FIXTURES='$F6' GH_TOKEN=x python3 '$GHDIR/gh.py' --stdin-json"
+
+# The mod's command enum is a static list; it must name exactly the engine's.
+enum_drift=$(python3 - "$GHDIR" "$ROOT/hooks/register.ts" <<'PYENUM'
+import re, sys
+sys.path.insert(0, sys.argv[1])
+import gh
+subs = set([a for a in gh.build_parser()._actions if a.dest == "command"][0].choices)
+src = open(sys.argv[2], encoding="utf-8").read()
+if "export const COMMANDS = [" not in src:
+    print("no COMMANDS list in register.ts")
+    sys.exit()
+block = src.split("export const COMMANDS = [", 1)[1].split("]", 1)[0]
+names = set(re.findall(r"'([a-z-]+)'", block))
+print(" ".join(sorted(subs ^ names)))
+PYENUM
+)
+check "the mod's COMMANDS match the engine's subcommands" "" "$enum_drift"
 
 
 echo

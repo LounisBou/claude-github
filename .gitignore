@@ -2,6 +2,7 @@
 *.bak
 __pycache__/
 *.pyc
+.claude-plugin/types/
 
 # docs/ holds working artefacts (specs, plans) that stay local to this
 # repository and are never committed.
