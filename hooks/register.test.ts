@@ -186,7 +186,7 @@ test('/checks reports the current branch PR CI status', async ($, on) => {
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
 
   const out = await $.command.run({ command: 'checks', args: '' })
-  expect(out.text).toBe('{"result": "SUCCESS"}')
+  expect(out.text).toBe('#12 CI: SUCCESS')
   expect(runs[0][2]).toBe('pr-get')
   expect(runs[1][2]).toBe('pr-checks')
   expect(runs[1]).toContain('12')
@@ -229,21 +229,31 @@ test('command failures surface the engine error, not a generic diagnostics line'
   expect(prs.text).toBe('error: no PR 999')
 })
 
+// The list endpoint carries no comment counts: those come from pr-status.
 const PR_LIST = JSON.stringify([
-  { number: 12, title: 'fix: related PRs', html_url: 'https://github.com/acme/thing/pull/12', draft: false, comments: 2, review_comments: 1 },
-  { number: 11, title: 'feat: minimize nodes', html_url: 'https://github.com/acme/thing/pull/11', draft: true, comments: 0, review_comments: 0 },
+  { number: 12, title: 'fix: related PRs', html_url: 'https://github.com/acme/thing/pull/12', draft: false },
+  { number: 11, title: 'feat: minimize nodes', html_url: 'https://github.com/acme/thing/pull/11', draft: true },
 ])
 
-test('/prs collects the first five PRs with CI and opens the pane', async ($, on) => {
+const ok = (stdout: string) => ({ exitCode: 0, stdout, stderr: '' })
+
+// A process.run reply chosen by subcommand, so parallel runs need no order.
+function byCommand(replies: Record<string, (e: any) => any>) {
+  return (e: any) => {
+    const reply = replies[e.argv[2]]
+    return reply ? reply(e) : { exitCode: 3, stdout: '', stderr: 'error: unexpected ' + e.argv[2] }
+  }
+}
+
+const prOf = (e: any) => e.argv[e.argv.length - 1]
+
+test('/prs reads each listed PR in detail and opens the pane', async ($, on) => {
   const runs: any[] = []
-  const writes: any[] = []
-  // Sequenced reply: pr-list first, then pr-checks for each PR.
-  let call = 0
-  await stubMod(on, runs, writes, () =>
-    (call += 1) === 1
-      ? { exitCode: 0, stdout: PR_LIST, stderr: '' }
-      : { exitCode: 0, stdout: JSON.stringify({ result: 'SUCCESS' }), stderr: '' },
-  )
+  await stubMod(on, runs, [], byCommand({
+    'pr-list': () => ok(PR_LIST),
+    'pr-checks': () => ok(JSON.stringify({ result: 'SUCCESS', failed_checks: [] })),
+    'pr-status': () => ok(JSON.stringify({ comments: 0, review_comments: 0 })),
+  }))
   const opened: any[] = []
   on('ui.open', (_$: any, e: any) => {
     opened.push(e)
@@ -254,9 +264,8 @@ test('/prs collects the first five PRs with CI and opens the pane', async ($, on
   const out = await $.command.run({ command: 'prs', args: '' })
   expect(out).toEqual({})
   expect(opened).toEqual([{ id: 'github-prs', title: 'PRs', closeOnEscape: true }])
-  expect(runs.length).toBe(3) // pr-list + pr-checks × 2
-  expect(runs[1][2]).toBe('pr-checks')
-  expect(runs[1]).toContain('12')
+  expect(runs.length).toBe(5) // pr-list + (pr-checks, pr-status) x 2
+  expect(runs.filter((a) => a[2] === 'pr-status').map((a) => a[a.length - 1]).sort()).toEqual(['11', '12'])
 })
 
 const PANE_EVENT = {
@@ -275,33 +284,53 @@ const PANE_EVENT = {
   },
 } as const
 
-test('the pane renders one row per PR with CI colour and a refresh button', async ($, on) => {
-  const runs: any[] = []
-  let call = 0
-  await stubMod(on, runs, [], () =>
-    (call += 1) === 1
-      ? { exitCode: 0, stdout: PR_LIST, stderr: '' }
-      : { exitCode: 0, stdout: JSON.stringify({ result: 'FAILURE' }), stderr: '' },
-  )
+test('the pane renders one row per PR with CI, comments and a refresh button', async ($, on) => {
+  await stubMod(on, [], [], byCommand({
+    'pr-list': () => ok(PR_LIST),
+    'pr-checks': () => ok(JSON.stringify({ result: 'FAILURE', failed_checks: ['lint'] })),
+    'pr-status': (e) => ok(JSON.stringify(prOf(e) === '12' ? { comments: 2, review_comments: 1 } : { comments: 0, review_comments: 0 })),
+  }))
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.command.run({ command: 'prs', args: '' })
 
   const ui = await $.ui.mount({ ...PANE_EVENT })
   expect(await ui.find({ type: 'Link', props: { href: 'https://github.com/acme/thing/pull/12' } })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /fix: related PRs/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /CI:FAILURE/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /draft/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /fix: related PRs .*CI:FAILURE 💬3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /minimize nodes ○ draft CI:FAILURE$/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'refresh' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the pane lists every PR, details the newest five and marks unreadable checks', async ($, on) => {
+  const many = Array.from({ length: 7 }, (_, i) => ({
+    number: 100 - i, title: 'PR ' + (100 - i), html_url: 'https://github.com/acme/thing/pull/' + (100 - i), draft: false,
+  }))
+  const runs: any[] = []
+  await stubMod(on, runs, [], byCommand({
+    'pr-list': () => ok(JSON.stringify(many)),
+    'pr-checks': (e) => prOf(e) === '100'
+      ? { exitCode: 3, stdout: '', stderr: 'error: boom' }
+      : ok(JSON.stringify({ result: 'SUCCESS', failed_checks: [] })),
+    'pr-status': () => ok(JSON.stringify({ comments: 0, review_comments: 0 })),
+  }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.command.run({ command: 'prs', args: '' })
+
+  const ui = await $.ui.mount({ ...PANE_EVENT })
+  expect(await ui.find({ type: 'Text', text: /PR 100 CI:\?/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /PR 99 CI:SUCCESS/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /PR 94 CI:–/ })).toBeDefined()
+  expect(runs.filter((a) => a[2] === 'pr-checks').length).toBe(5)
   await ui.unmount()
 })
 
 test('the pane with no open PRs says so and Refresh re-collects', async ($, on) => {
   const runs: any[] = []
-  let call = 0
-  await stubMod(on, runs, [], () => ({
-    exitCode: 0,
-    stdout: (call += 1) === 1 ? '[]' : PR_LIST,
-    stderr: '',
+  let lists = 0
+  await stubMod(on, runs, [], byCommand({
+    'pr-list': () => ok((lists += 1) === 1 ? '[]' : PR_LIST),
+    'pr-checks': () => ok(JSON.stringify({ result: 'PENDING', failed_checks: [] })),
+    'pr-status': () => ok('{}'),
   }))
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.command.run({ command: 'prs', args: '' })
@@ -309,10 +338,38 @@ test('the pane with no open PRs says so and Refresh re-collects', async ($, on) 
   const ui = await $.ui.mount({ ...PANE_EVENT })
   expect(await ui.find({ type: 'Text', text: /No open PRs/ })).toBeDefined()
 
-  await ui.press({ key: 'refresh' }) // stub now returns PR_LIST
+  await ui.press({ key: 'refresh' })
   expect(await ui.find({ type: 'Text', text: /fix: related PRs/ })).toBeDefined()
   expect(runs.filter((a) => a[2] === 'pr-list').length).toBe(2)
   await ui.unmount()
+})
+
+test('a failed Refresh keeps the last rows and shows the error', async ($, on) => {
+  let lists = 0
+  await stubMod(on, [], [], byCommand({
+    'pr-list': () => (lists += 1) === 1 ? ok(PR_LIST) : { exitCode: 5, stdout: '', stderr: 'error: rate limited\n' },
+    'pr-checks': () => ok(JSON.stringify({ result: 'SUCCESS', failed_checks: [] })),
+    'pr-status': () => ok('{}'),
+  }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.command.run({ command: 'prs', args: '' })
+
+  const ui = await $.ui.mount({ ...PANE_EVENT })
+  await ui.press({ key: 'refresh' })
+  expect(await ui.find({ type: 'Text', text: /fix: related PRs/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'error: rate limited' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', props: { label: 'Refresh' } })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/checks names the failed checks and accepts #12', async ($, on) => {
+  const runs: any[] = []
+  await stubMod(on, runs, [], ok(JSON.stringify({ result: 'FAILURE', failed_checks: ['lint', 'test'] })))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.command.run({ command: 'checks', args: '#12' })
+  expect(out.text).toBe('#12 CI: FAILURE (lint, test)')
+  expect(prOf({ argv: runs[0] })).toBe('12')
 })
 
 test('every read-only command is a real subcommand', () => {

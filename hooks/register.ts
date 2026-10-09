@@ -197,12 +197,30 @@ async function permit($: any, e: any): Promise<string | undefined> {
   return 'the user refused gh ' + e.command
 }
 
-async function prText($: any, rawArgs: string, command: string, format: string): Promise<string> {
-  const explicit = (rawArgs ?? '').trim()
-  if (explicit) return runGh($, command, { pr: explicit, format })
+async function prText(
+  $: any,
+  rawArgs: string,
+  command: string,
+  format: string,
+  shape: (pr: string, out: string) => string = (_pr, out) => out,
+): Promise<string> {
+  // "#12" is how a PR number is usually written by hand.
+  const explicit = (rawArgs ?? '').trim().replace(/^#/, '')
+  if (explicit) return shape(explicit, await runGh($, command, { pr: explicit, format }))
   const current = (await runGh($, 'pr-get', { format: 'pr-number' })).trim()
   if (!current) return 'no open PR for this branch'
-  return runGh($, command, { pr: current, format })
+  return shape(current, await runGh($, command, { pr: current, format }))
+}
+
+// checks-status JSON as a line a person reads: "#12 CI: FAILURE (lint, test)".
+export function checksLine(pr: string, out: string): string {
+  try {
+    const status = JSON.parse(out)
+    const failed: string[] = status.failed_checks ?? []
+    return '#' + pr + ' CI: ' + status.result + (failed.length > 0 ? ' (' + failed.join(', ') + ')' : '')
+  } catch {
+    return out
+  }
 }
 
 export type PaneRow = {
@@ -210,42 +228,85 @@ export type PaneRow = {
   title: string
   url: string
   draft: boolean
-  comments: number
+  // null when the PR was not looked up in detail, or the lookup failed.
+  comments: number | null
+  // SUCCESS, FAILURE or PENDING from checks-status; "?" when the checks could
+  // not be read, "–" past the PRs looked up in detail.
   ci: string
 }
 
+// Each detailed PR costs two engine runs (its checks and its own record,
+// which alone carries the comment counts), so only the newest are detailed.
+export const DETAILED = 5
+
 let paneRows: PaneRow[] = []
+let paneError: string | undefined
+let refreshing = false
 
 function ciColor(ci: string): string {
-  if (ci === 'SUCCESS') return 'green'
-  if (ci === 'FAILURE') return 'red'
-  return 'yellow'
+  if (ci === 'SUCCESS') return 'success'
+  if (ci === 'FAILURE') return 'error'
+  if (ci === 'PENDING') return 'warning'
+  return 'inactive'
+}
+
+async function detail($: any, pr: number): Promise<{ ci: string; comments: number | null }> {
+  const [checks, status] = await Promise.allSettled([
+    runGh($, 'pr-checks', { pr, format: 'checks-status' }),
+    runGh($, 'pr-status', { pr }),
+  ])
+  let ci = '?'
+  let comments: number | null = null
+  try {
+    if (checks.status === 'fulfilled') ci = String(JSON.parse(checks.value).result)
+  } catch {
+    // Unreadable checks stay "?": never shown as a state they are not.
+  }
+  try {
+    if (status.status === 'fulfilled') {
+      const pull = JSON.parse(status.value)
+      comments = (pull.comments ?? 0) + (pull.review_comments ?? 0)
+    }
+  } catch {
+    // Unreadable record: no count shown.
+  }
+  return { ci, comments }
 }
 
 async function collectRows($: any): Promise<void> {
   const prs = JSON.parse(await runGh($, 'pr-list')) as any[]
-  const rows: PaneRow[] = []
-  for (const p of prs.slice(0, 5)) {
-    let ci = 'PENDING'
-    try {
-      ci = String(JSON.parse(await runGh($, 'pr-checks', { pr: String(p.number), format: 'checks-status' })).result)
-    } catch {
-      // Leave the row at PENDING rather than dropping the PR.
-    }
-    rows.push({
-      number: p.number,
-      title: String(p.title ?? ''),
-      url: String(p.html_url ?? ''),
-      draft: Boolean(p.draft),
-      comments: (p.comments ?? 0) + (p.review_comments ?? 0),
-      ci,
-    })
+  const details = await Promise.all(
+    prs.slice(0, DETAILED).map((p) => detail($, Number(p.number))),
+  )
+  paneRows = prs.map((p, i) => ({
+    number: p.number,
+    title: String(p.title ?? ''),
+    url: String(p.html_url ?? ''),
+    draft: Boolean(p.draft),
+    comments: details[i]?.comments ?? null,
+    ci: details[i]?.ci ?? '–',
+  }))
+}
+
+async function refresh($: any): Promise<void> {
+  if (refreshing) return
+  refreshing = true
+  $.ui.invalidate('ui.render')
+  try {
+    await collectRows($)
+    paneError = undefined
+  } catch (err: any) {
+    // The rows from the last good read stay on screen under the error.
+    paneError = String(err?.message ?? err).trim()
+  } finally {
+    refreshing = false
+    $.ui.invalidate('ui.render')
   }
-  paneRows = rows
 }
 
 function clip(text: string, max: number): string {
-  return text.length > max ? text.slice(0, max - 1) + '…' : text
+  const room = Math.max(1, max)
+  return text.length > room ? text.slice(0, room - 1) + '…' : text
 }
 
 export function register(on: any): void {
@@ -300,7 +361,7 @@ export function register(on: any): void {
 
   on('command.run', { command: 'checks' }, async ($: any, e: any) => {
     try {
-      return { text: await prText($, e.args, 'pr-checks', 'checks-status') }
+      return { text: await prText($, e.args, 'pr-checks', 'checks-status', checksLine) }
     } catch (err: any) {
       return { text: String(err?.message ?? err) }
     }
@@ -317,6 +378,7 @@ export function register(on: any): void {
   on('command.run', { command: 'prs' }, async ($: any, _e: any) => {
     try {
       await collectRows($)
+      paneError = undefined
       await $.ui.open({ id: PANE_ID, title: 'PRs', closeOnEscape: true })
       return {}
     } catch (err: any) {
@@ -329,7 +391,7 @@ export function register(on: any): void {
     const { Box, Text, Button, Link } = $.ui.resolve(e)
     const width = e.props?.bodyColumns ?? 80
     const rows = paneRows.length === 0
-      ? [Text({ children: ['No open PRs'] })]
+      ? [Text({ key: 'empty', children: [refreshing ? 'Loading…' : 'No open PRs'] })]
       : paneRows.map((r) =>
           Box({
             key: 'pr-' + r.number,
@@ -342,7 +404,7 @@ export function register(on: any): void {
                   clip(r.title, width - 28)
                   + (r.draft ? ' ○ draft' : '')
                   + ' CI:' + r.ci
-                  + (r.comments > 0 ? ' 💬' + r.comments : ''),
+                  + (r.comments ? ' 💬' + r.comments : ''),
                 ] },
               ),
             ],
@@ -353,13 +415,11 @@ export function register(on: any): void {
       flexDirection: 'column',
       children: [
         ...rows,
+        ...(paneError ? [Text({ key: 'error', color: 'error', children: [paneError] })] : []),
         Button({
           key: 'refresh',
-          label: 'Refresh',
-          onPress: async () => {
-            await collectRows($)
-            $.ui.invalidate('ui.render')
-          },
+          label: refreshing ? 'Refreshing…' : 'Refresh',
+          onPress: () => refresh($),
         }),
       ],
     })
