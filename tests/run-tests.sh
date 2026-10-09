@@ -1107,6 +1107,20 @@ stale=$(grep -rn '\.claude/skills/' "$ROOT/engine" 2>/dev/null || true)
 check "no relative skill paths" "" "$stale"
 
 
+echo "== fallback skill =="
+
+# Plugins built on earlier releases run skills/github-curl/gh.py: it must keep
+# behaving as the engine itself, output and exit codes alike.
+SHIM="$ROOT/skills/github-curl/gh.py"
+check "the former entry point runs the engine" "someone" \
+  "$(env GH_FIXTURES="$F2" GH_TOKEN=x GH_REPO=acme/thing python3 "$SHIM" auth-check --format login)"
+check_status "the former entry point keeps the engine's exit codes" 1 \
+  env GH_FIXTURES="$F2" GH_TOKEN=x GH_REPO=acme/thing python3 "$SHIM" pr-comment 7 --body-file "$WORK/nope.md"
+check "the fallback skill points at the engine" "1" \
+  "$(grep -cF '${CLAUDE_PLUGIN_ROOT}/engine/gh.py' "$ROOT/skills/github-curl/SKILL.md")"
+check "the fallback skill defers to the native tool" "1" \
+  "$(grep -qF 'mcp__github__gh' "$ROOT/skills/github-curl/SKILL.md" && echo 1 || echo 0)"
+
 echo "== writing rules =="
 
 WRITINGDOC="$ROOT/engine/WRITING.md"

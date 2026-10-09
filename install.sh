@@ -20,6 +20,9 @@ if [ "$code" -eq 0 ]; then
   echo "                review threads, comments, reviews, labels, issues, search"
   echo "                and image attachments"
   echo
+  echo "Skill available (where mods do not load):"
+  echo "  github-curl   the same engine from Bash"
+  echo
   echo "GitHub engine: \${CLAUDE_PLUGIN_ROOT}/engine/gh.py"
   exit 0
 fi
