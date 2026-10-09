@@ -144,3 +144,45 @@ test('a usage error in args is reported without running gh.py', async ($, on) =>
   expect(String(out.result)).toContain('missing argument "pr"')
   expect(runs.length).toBe(0)
 })
+
+test('/checks reports the current branch PR CI status', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  // Sequenced reply: pr-get first, then pr-checks.
+  let call = 0
+  await stubMod(on, runs, writes, () =>
+    (call += 1) === 1
+      ? { exitCode: 0, stdout: '12\n', stderr: '' }
+      : { exitCode: 0, stdout: '{"result": "SUCCESS"}', stderr: '' },
+  )
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.command.run({ command: 'checks', args: '' })
+  expect(out.text).toBe('{"result": "SUCCESS"}')
+  expect(runs[0][2]).toBe('pr-get')
+  expect(runs[1][2]).toBe('pr-checks')
+  expect(runs[1]).toContain('12')
+})
+
+test('/checks without a PR on the branch says so, in one call', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  await stubMod(on, runs, writes, { exitCode: 0, stdout: '\n', stderr: '' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.command.run({ command: 'checks', args: '' })
+  expect(out.text).toBe('no open PR for this branch')
+  expect(runs.length).toBe(1)
+})
+
+test('/threads with an explicit PR skips the lookup', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  await stubMod(on, runs, writes, { exitCode: 0, stdout: '| thread | line |', stderr: '' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.command.run({ command: 'threads', args: ' 12 ' })
+  expect(out.text).toBe('| thread | line |')
+  expect(runs.length).toBe(1)
+  expect(runs[0][2]).toBe('pr-threads')
+})

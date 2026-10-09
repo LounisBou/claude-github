@@ -138,6 +138,14 @@ async function runGh($: any, command: string, args: Record<string, unknown> = {}
   return r.stdout
 }
 
+async function prText($: any, rawArgs: string, command: string, format: string): Promise<string> {
+  const explicit = (rawArgs ?? '').trim()
+  if (explicit) return runGh($, command, { pr: explicit, format })
+  const current = (await runGh($, 'pr-get', { format: 'pr-number' })).trim()
+  if (!current) return 'no open PR for this branch'
+  return runGh($, command, { pr: current, format })
+}
+
 export function register(on: any): void {
   on('session.start', async ($: any, e: any, next: any) => {
     const root = $.plugin.root
@@ -187,4 +195,12 @@ export function register(on: any): void {
   }).catch(async (_$: any, _e: any, next: any) =>
     ({ result: 'github mod error: the hook failed; run /github:doctor for diagnostics', isError: true }),
   )
+
+  on('command.run', { command: 'checks' }, async ($: any, e: any) => {
+    return { text: await prText($, e.args, 'pr-checks', 'checks-status') }
+  }).catch(async () => ({ text: 'github mod: /checks failed; run /github:doctor for diagnostics' }))
+
+  on('command.run', { command: 'threads' }, async ($: any, e: any) => {
+    return { text: await prText($, e.args, 'pr-threads', 'thread-summary') }
+  }).catch(async () => ({ text: 'github mod: /threads failed; run /github:doctor for diagnostics' }))
 }
