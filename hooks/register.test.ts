@@ -137,6 +137,7 @@ test('the gh tool runs gh.py with the mapped argv and preserves body bytes', asy
   expect(argv).toContain('--body-file=' + writes[0].path)
   expect(argv).toContain('--repo=acme/thing')
   expect(argv.slice(-2)).toEqual(['--', '12'])
+  expect(runs[1]).toEqual(['rm', '-f', writes[0].path])
 })
 
 test('a non-zero gh.py exit returns isError with stderr', async ($, on) => {
@@ -399,4 +400,12 @@ test('a write that needs permission is refused when nobody can be asked', async 
   const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-comment', args: { pr: 1, body: 'x' } })
   expect(JSON.stringify(out)).toContain('nobody could be asked')
   expect(runs.length).toBe(0)
+})
+
+test('a truncated engine output says so', async ($, on) => {
+  await stubMod(on, [], [], { exitCode: 0, stdout: 'diff', stderr: '', isStdoutTruncated: true })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-diff', args: { pr: 1 } })
+  expect(out).toEqual({ result: 'diff\n[output cut at 4 MiB]' })
 })

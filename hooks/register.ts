@@ -156,13 +156,20 @@ export function toArgv(
 
 async function runGh($: any, command: string, args: Record<string, unknown> = {}, repo?: string): Promise<string> {
   const { argv, files } = toArgv(command, args, repo)
-  for (const f of files) await $.fs.write(f.path, f.text)
-  const r = await $.process.run(
-    ['python3', $.plugin.root + '/engine/gh.py', command, ...argv],
-    { timeoutMs: 120_000 },
-  )
-  if (r.exitCode !== 0) throw new Error(r.stderr || 'gh.py exited ' + r.exitCode)
-  return r.stdout
+  try {
+    for (const f of files) await $.fs.write(f.path, f.text)
+    const r = await $.process.run(
+      ['python3', $.plugin.root + '/engine/gh.py', command, ...argv],
+      { timeoutMs: 120_000 },
+    )
+    if (r.exitCode !== 0) throw new Error(r.stderr || 'gh.py exited ' + r.exitCode)
+    return r.isStdoutTruncated ? r.stdout + '\n[output cut at 4 MiB]' : r.stdout
+  } finally {
+    // The bodies may be private review text: none outlives its call.
+    if (files.length > 0) {
+      await $.process.run(['rm', '-f', ...files.map((f) => f.path)]).catch(() => undefined)
+    }
+  }
 }
 
 /*
