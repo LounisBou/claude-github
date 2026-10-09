@@ -1,71 +1,30 @@
----
-name: github-curl
-description: |
-  Use when making GitHub API calls. Provides a Python standard-library tool covering
-  pull requests, review threads, comments, reviews, metadata, issues and image
-  attachments, without the gh CLI.
-  WHEN: any GitHub API interaction (PRs, threads, comments, reviews, labels, issues,
-  image upload).
-  WHEN NOT: non-GitHub APIs.
----
+# gh.py reference
 
-# github-curl
+## Calling
 
-## Overview
+The mod's `mcp__github__gh` tool runs this CLI: each `command` is a subcommand
+below, and the `args` object holds the subcommand's arguments.
 
-One entry point: `${CLAUDE_PLUGIN_ROOT}/skills/github-curl/gh.py`. Python 3.9+
-standard library only — nothing to install. It replaces the older pair of shell and
-Python scripts; every subcommand name they used still works, and the only change is
-that formatting became a flag instead of a second script in a pipe.
+- Positional arguments go by their documented name: `pr-checks` → `{"pr": 12}`,
+  `file-at-ref` → `{"path": "a.txt", "ref": "HEAD"}`. Variadic positionals
+  (`label...`, `user...`, `term...`, `file...`) take an array.
+- Every other key becomes the same `--flag`: `{"branch": "x"}` → `--branch x`,
+  `{"format": "pr-number"}` → `--format pr-number`, `{"draft": true}` → `--draft`.
+- Text bodies go in `"body"` as a plain string — the mod writes the file and
+  passes `--body-file`; the bytes travel unchanged. Inline-comment arrays go in
+  `"comments"` (`--comments-file`), and `comments-resolved-batch` takes `"nodes"`
+  (an array of node ids).
 
-## Preflight
+Example:
 
-Run this first and stop on a non-zero exit:
-
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"
+```json
+{ "command": "pr-comment", "args": { "pr": 12, "body": "Multi-line `markdown`" } }
 ```
 
-It verifies that `python3`, `curl` and a GitHub token are available, and that the
-working directory is a GitHub repository clone. On failure it prints one `error:`
-line and one `fix:` line naming what to do.
-
-## Usage
-
-```bash
-GH="${CLAUDE_PLUGIN_ROOT}/skills/github-curl/gh.py"
-
-PR=$(python3 "$GH" pr-get --format pr-number)
-python3 "$GH" pr-threads "$PR" --format thread-summary
-
-cat > /tmp/comment.md <<'EOF'
-Multi-line markdown with `backticks`, "quotes" and $VARIABLES is safe here.
-EOF
-python3 "$GH" pr-comment "$PR" --body-file /tmp/comment.md
-```
-
-`--repo owner/name` and `--format NAME` work on either side of the subcommand.
-Without `--repo`, the repository is read from the `origin` remote.
-
-## Bodies
-
-**Every text body is passed with `--body-file <path>`. There is no `--body "text"`
-form on any subcommand, and none may be added.**
-
-Multi-line markdown containing backticks, quotes and `$VAR` sequences does not
-survive shell quoting, and the failure is silent: the request succeeds with mangled
-text. Write the text to a file first. The file's bytes are sent unchanged — no
-stripping, no newline translation, so a CRLF file round-trips intact.
-
-Subcommands taking `--body-file`: `pr-comment`, `thread-reply`, `comment-edit`,
-`review-submit`, `pr-update`, `pr-create`.
-
-## Writing rules
+`repo` (`owner/name`) overrides the `origin` remote.
 
 Before writing a commit message, a pull request title, a pull request description
-or a review comment, read `${CLAUDE_PLUGIN_ROOT}/skills/github-curl/WRITING.md`
-beside this file. Every text is checked against it before it leaves the machine.
-The file is the norm, this section only points at it.
+or a review comment, read `WRITING.md` beside this file.
 
 ## Subcommands
 

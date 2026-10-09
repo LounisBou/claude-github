@@ -114,7 +114,7 @@ check_status "no plugins enabled still exits 0" 0 \
 
 echo "== http transport =="
 
-GHDIR="$ROOT/skills/github-curl"
+GHDIR="$ROOT/engine"
 FIX="$WORK/fix"; mkdir -p "$FIX"
 
 printf '%s' '{"number":42,"title":"A title"}' > "$FIX/GET_repos_acme_thing_pulls_42.json"
@@ -902,7 +902,7 @@ check "a status read that fails with a 422 does not end the wait" "abc" "$status
 
 echo "== skill documents =="
 
-SKILLDOC="$ROOT/skills/github-curl/SKILL.md"
+SKILLDOC="$ROOT/engine/REFERENCE.md"
 
 echo "== pending reviews =="
 
@@ -1067,7 +1067,7 @@ check "marketplace version matches" "0.3.0 0.3.0" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
-  check "SKILL.md documents '$needle'" "1" \
+  check "REFERENCE.md documents '$needle'" "1" \
     "$(grep -qF -- "$needle" "$SKILLDOC" && echo 1 || echo 0)"
 done
 
@@ -1098,13 +1098,13 @@ PYFMT
 check "every formatter is documented" "" "$undocumented_formats"
 
 # No relative .claude/skills path may survive the move into a plugin.
-stale=$(grep -rn '\.claude/skills/' "$ROOT/skills" 2>/dev/null || true)
+stale=$(grep -rn '\.claude/skills/' "$ROOT/engine" 2>/dev/null || true)
 check "no relative skill paths" "" "$stale"
 
 
 echo "== writing rules =="
 
-WRITINGDOC="$ROOT/skills/github-curl/WRITING.md"
+WRITINGDOC="$ROOT/engine/WRITING.md"
 
 check "WRITING.md exists" "yes" "$([ -f "$WRITINGDOC" ] && echo yes || echo no)"
 
@@ -1131,8 +1131,8 @@ check "WRITING.md headings are in order" \
   "Commit messages | Pull request titles | Pull request descriptions | Review comments" \
   "$headings"
 
-check "SKILL.md names a Writing rules section" "1" \
-  "$(grep -c '^## Writing rules' "$SKILLDOC")"
+check "REFERENCE.md points at WRITING.md" "1" \
+  "$(grep -cF 'read `WRITING.md` beside this file' "$SKILLDOC")"
 
 for needle in '--draft' '**TODO Staging:**' '**TODO Prod:**' '**PRs Dependency:**' '**Related PRs:**' 'one `- ` bullet per item' 'follow-up' 'mandatory' 'kept apart' 'no semicolon' 'never edited without' 'heading'; do
   check "WRITING.md mentions '$needle'" "1" \
@@ -1307,15 +1307,15 @@ from ghlib import fmt
 subs = set([a for a in gh.build_parser()._actions if a.dest == "command"][0].choices)
 fmts = set(fmt._FORMATTERS)
 bad = []
-for name in ("github-curl",):
-    path = os.path.join(sys.argv[2], "skills", name, "SKILL.md")
-    for i, line in enumerate(open(path, encoding="utf-8"), 1):
-        m = re.search(r'python3\s+"\$GH"\s+([a-z][a-z0-9-]+)', line)
-        if m and m.group(1) not in subs:
-            bad.append("%s:%d subcommand %s" % (name, i, m.group(1)))
-        for f in re.finditer(r'--format\s+([a-z][a-z0-9-]+)', line):
-            if f.group(1) not in fmts:
-                bad.append("%s:%d format %s" % (name, i, f.group(1)))
+name = "REFERENCE.md"
+path = os.path.join(sys.argv[2], "engine", name)
+for i, line in enumerate(open(path, encoding="utf-8"), 1):
+    m = re.search(r'python3\s+"\$GH"\s+([a-z][a-z0-9-]+)', line)
+    if m and m.group(1) not in subs:
+        bad.append("%s:%d subcommand %s" % (name, i, m.group(1)))
+    for f in re.finditer(r'--format\s+([a-z][a-z0-9-]+)', line):
+        if f.group(1) not in fmts:
+            bad.append("%s:%d format %s" % (name, i, f.group(1)))
 print(" ".join(bad))
 PYREV
 )

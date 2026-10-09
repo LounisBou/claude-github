@@ -15,12 +15,12 @@ code=$?
 if [ "$code" -eq 0 ]; then
   echo "github: all dependencies satisfied."
   echo
-  echo "Skills available:"
-  echo "  github-curl   GitHub API calls from the standard library: pull requests,"
+  echo "Tool available:"
+  echo "  gh            GitHub API calls from the standard library: pull requests,"
   echo "                review threads, comments, reviews, labels, issues, search"
   echo "                and image attachments"
   echo
-  echo "GitHub tool: \${CLAUDE_PLUGIN_ROOT}/skills/github-curl/gh.py"
+  echo "GitHub engine: \${CLAUDE_PLUGIN_ROOT}/engine/gh.py"
   exit 0
 fi
 
