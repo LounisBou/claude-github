@@ -7,6 +7,7 @@ test('session.start registers the gh tool and the three commands', async ($, on)
   on('tool.register', (_$, e) => {
     registered.push('tool:' + e.name)
     expect(e.inputSchema.properties.command.enum).toEqual(Object.keys(POSITIONALS))
+    expect(e.isDeferred).toBe(false)
     return { value: undefined }
   })
   on('command.register', (_$, e) => {

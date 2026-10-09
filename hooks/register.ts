@@ -314,6 +314,9 @@ export function register(on: any): void {
     const root = $.plugin.root
     await $.tool.register({
       name: 'gh',
+      // Listed with its schema from the start: behind ToolSearch the model
+      // would reach for Bash and curl before it found this tool.
+      isDeferred: false,
       description:
         'GitHub API: pull requests, review threads, comments, reviews, labels, '
         + 'issues, search, image uploads. Before first use, Read '
