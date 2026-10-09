@@ -52,6 +52,81 @@ export const POSITIONALS: Record<string, string[]> = {
   'auth-check': [],
 }
 
+export class UsageError extends Error {}
+
+let fileSeq = 0
+
+function tmpPath(kind: string, ext: string): string {
+  fileSeq += 1
+  return '/tmp/claude-github-' + kind + '-' + fileSeq + ext
+}
+
+function strings(key: string, value: unknown): string[] {
+  if (Array.isArray(value)) {
+    if (value.some((v) => typeof v === 'object' || v === null)) {
+      throw new UsageError('array values must contain only scalars: ' + key)
+    }
+    return value.map((v) => String(v))
+  }
+  if (typeof value === 'string' || typeof value === 'number') return [String(value)]
+  throw new UsageError('unsupported value for "' + key + '"')
+}
+
+export function toArgv(
+  command: string,
+  args: Record<string, unknown>,
+  repo?: string,
+): { argv: string[]; files: { path: string; text: string }[] } {
+  const positionals = POSITIONALS[command]
+  if (!positionals) throw new UsageError('unknown command: ' + command)
+
+  const files: { path: string; text: string }[] = []
+  const flags: string[] = []
+  const byName: Record<string, string[]> = {}
+
+  for (const [key, value] of Object.entries(args ?? {})) {
+    if (value === undefined || value === null) continue
+    const isPositional = positionals.some((p) => p === key || p === key + '...')
+    if (key === 'body') {
+      if (typeof value !== 'string') throw new UsageError('body must be a string')
+      const path = tmpPath('body', '.md')
+      files.push({ path, text: value })
+      flags.push('--body-file', path)
+    } else if (key === 'comments') {
+      if (!Array.isArray(value)) throw new UsageError('comments must be an array')
+      const path = tmpPath('comments', '.json')
+      files.push({ path, text: JSON.stringify(value) })
+      flags.push('--comments-file', path)
+    } else if (isPositional && key === 'nodes') {
+      if (!Array.isArray(value)) throw new UsageError('nodes must be an array')
+      const path = tmpPath('nodes', '.json')
+      files.push({ path, text: JSON.stringify(value) })
+      byName[key] = [path]
+    } else if (isPositional) {
+      byName[key] = strings(key, value)
+    } else if (typeof value === 'boolean') {
+      if (value) flags.push('--' + key)
+    } else if (typeof value === 'string' || typeof value === 'number') {
+      flags.push('--' + key, String(value))
+    } else if (Array.isArray(value)) {
+      for (const v of strings(key, value)) flags.push('--' + key, v)
+    } else {
+      throw new UsageError('unsupported value for "' + key + '"')
+    }
+  }
+
+  const argv: string[] = []
+  for (const slot of positionals) {
+    const bare = slot.replace(/\.\.\.$/, '')
+    const got = byName[bare]
+    if (!got || got.length === 0) throw new UsageError('missing argument "' + bare + '" for ' + command)
+    argv.push(...got)
+  }
+  argv.push(...flags)
+  if (repo) argv.push('--repo', repo)
+  return { argv, files }
+}
+
 export function register(on: any): void {
   on('session.start', async ($: any, e: any, next: any) => {
     const root = $.plugin.root
