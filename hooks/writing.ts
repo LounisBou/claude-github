@@ -88,6 +88,25 @@ const TRAILER_RULE = 'no trailer or attribution such as Co-Authored-By or Claude
 const TITLE_LINE_RULE = 'a title is one line (WRITING.md, « Pull request titles »)'
 const TITLE_LENGTH_RULE = 'a title is about sixty characters at most, this one has '
 const HEADING_RULE = 'no heading of any kind in a pull request description, it starts with the summary text (WRITING.md, « Pull request descriptions »)'
+const TODO_RULE = 'a TODO Staging or TODO Prod item is a task-list checkbox, `- [ ] <step>`, never a bare `- ` bullet (WRITING.md, « Pull request descriptions »)'
+const TODO_LABEL = /^\*\*TODO (Staging|Prod):\*\*\s*$/
+const BOLD_LABEL = /^\*\*[^*]+:\*\*\s*$/
+
+// A bare bullet under a TODO label: the section runs from its label to the next
+// bold label or blank-line-separated prose, and every list item in it must be
+// a checkbox the operator can tick.
+function bareTodoItem(lines: string[]): boolean {
+  let inTodo = false
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (TODO_LABEL.test(line)) { inTodo = true; continue }
+    if (BOLD_LABEL.test(line)) { inTodo = false; continue }
+    if (!inTodo || line === '') continue
+    if (/^[-*+]\s/.test(line) && !/^[-*+]\s+\[[ xX]\]\s/.test(line)) return true
+    if (!/^[-*+]\s/.test(line)) inTodo = false
+  }
+  return false
+}
 
 // Every rule one field breaks, each named once.
 function lintField(kind: 'pr' | 'comment', field: string, text: string): Violation[] {
@@ -104,6 +123,7 @@ function lintField(kind: 'pr' | 'comment', field: string, text: string): Violati
   if (lines.some((l) => strip(l).includes(';'))) add(SEMICOLON_RULE)
   if (lines.some((l) => TRAILER.test(l))) add(TRAILER_RULE)
   if (kind === 'pr' && field === 'body' && lines.some((l) => HEADING.test(l))) add(HEADING_RULE)
+  if (kind === 'pr' && field === 'body' && bareTodoItem(lines)) add(TODO_RULE)
   return found
 }
 
