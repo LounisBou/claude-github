@@ -65,8 +65,10 @@ with `## Summary` or any other title. State what the PR does, never what it does
 do — no list of omissions, no rejected alternatives, no things left untouched. Phrase
 a prerequisite positively ("X must have Y set", not "it will fail without Y").
 The four sections come after the summary text, in that order, each in that exact shape
-whatever the number of items: the bold label alone on its line, then one `- ` bullet per item, one
-item per line, nothing else on the line — the line break and the dash are what keep
+whatever the number of items: the bold label alone on its line, then one item per line,
+nothing else on the line. A TODO Staging or TODO Prod item is a task-list checkbox, `- [ ] <step>`,
+never a bare `- ` bullet: the operator ticks it as the step is done. A PRs Dependency or Related PRs
+item is a `- ` bullet — the line break and the dash are what keep
 GitHub's preview rendering every link as a pull request card. Never a heading, never a
 link inline after the label. Every section is optional and present only when needed,
 never written empty or as `none`. A TODO section is mandatory whenever there is

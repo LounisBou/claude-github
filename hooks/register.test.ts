@@ -456,6 +456,13 @@ test('a heading in a pull request description is refused, a hash in a comment or
   expect(rulesOf('pr-create', { title: 't', body: '## Summary\nText' })).toEqual(['body: no heading of any kind in a pull request description, it starts with the summary text'])
   expect(rulesOf('pr-update', { pr: 1, body: 'Text\n\n# Notes\nmore' }).length).toBe(1)
   expect(lint('pr-comment', { pr: 1, body: '## Not a description' })).toEqual([])
+  // TODO items are checkboxes the operator ticks; dependency and related links stay bullets.
+  const todoBare = 'Adds the reset.\n\n**TODO Prod:**\n- Deploy the API first\n\n**Related PRs:**\n- https://github.com/o/r/pull/1'
+  expect(rulesOf('pr-create', { title: 't', body: todoBare })).toEqual(['body: a TODO Staging or TODO Prod item is a task-list checkbox, `- [ ] <step>`, never a bare `- ` bullet'])
+  expect(rulesOf('pr-update', { pr: 1, body: todoBare })).toEqual(['body: a TODO Staging or TODO Prod item is a task-list checkbox, `- [ ] <step>`, never a bare `- ` bullet'])
+  const todoBoxes = 'Adds the reset.\n\n**TODO Staging:**\n- [ ] Run the migration\n\n**TODO Prod:**\n- [x] Deploy the API first\n- [ ] Run the migration\n\n**PRs Dependency:**\n- https://github.com/o/r/pull/1'
+  expect(lint('pr-create', { title: 't', body: todoBoxes })).toEqual([])
+  expect(lint('pr-create', { title: 't', body: 'A list of changes:\n- one\n- two' })).toEqual([])
   expect(lint('pr-create', { title: 't', body: 'Fixes #12\n#hashtag\n```sh\n# a shell comment\n```' })).toEqual([])
 })
 
