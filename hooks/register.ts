@@ -2,6 +2,11 @@
 // arguments are typed loosely here; Claude Code writes the exact API types
 // to .claude-plugin/types/ the first time the mod loads (gitignored).
 
+import { atom, read, update } from 'claude-code'
+
+import type { GithubPane, GithubPaneRow } from '../types'
+import { lint, refusal, textFields } from './writing.ts'
+
 export const PANE_ID = 'github-prs'
 
 // The gh.py subcommands, for the tool's command enum. gh.py itself maps the
@@ -50,22 +55,110 @@ async function runGh($: any, command: string, args: Record<string, unknown> = {}
  * behind it lets a read through, as reading is what the tool is mostly for,
  * and puts a write to the person. An ask from an explicit rule always asks.
  * Where nobody can answer (a -p run) the ask rejects and the call is refused.
+ *
+ * Between the verdict and the run come the house rules of engine/WRITING.md:
+ * the mechanical ones refuse a text before it leaves the machine, and the
+ * approvals the file reserves to the person (an existing description, a pull
+ * request out of draft) are asked whatever the settings allow.
  */
 async function permit($: any, e: any): Promise<string | undefined> {
   const input = { command: e.command, args: e.args, repo: e.repo }
   const verdict = await $.tool.check({ tool: TOOL, input })
-  if (verdict.decision === 'allow') return undefined
   if (verdict.decision === 'deny') return verdict.reason || 'refused by a permission rule'
+  const args = e.args ?? {}
+
+  const found = lint(e.command, args, lastTyped)
+  if (found.length > 0) {
+    const print = fingerprint(e)
+    if (!refusedOnce.has(print)) {
+      refusedOnce.add(print)
+      return refusal(e.command, found)
+    }
+    // The same text again: the person decides whether it goes as it is.
+    const rules = [...new Set(found.map((v) => v.rule.split(' (')[0]))].join(', ')
+    return ask($, describe(e) + ', which breaks the writing rules (' + rules + '). Send it as it is?',
+      ['Send as it is', 'Deny'], e.command)
+  }
+
+  const reserved = reservedToPerson(e.command, args)
+  if (reserved) return ask($, reserved + ' ' + describe(e) + '?', ['Allow', 'Deny'], e.command)
+
+  if (verdict.decision === 'allow') return undefined
   if (READS.has(e.command) && !verdict.rule) return undefined
-  const detail = JSON.stringify(e.args ?? {})
-  const question = 'Run gh ' + e.command + ' on ' + (e.repo || 'the origin repository') + ' with '
-    + (detail.length > 200 ? detail.slice(0, 199) + '…' : detail) + '?'
+
+  // A grant for the session stands in for an ask no rule demanded, and only
+  // for the command and repository it was given on.
+  const grantable = !verdict.rule && !NEVER_GRANTED.has(e.command)
+  const key = grantable ? await grantKey($, e) : undefined
+  if (key && sessionGrants.has(key)) return undefined
+  if (!key) return ask($, describe(e) + '?', ['Allow', 'Deny'], e.command)
+  const where = e.repo || 'the origin repository'
+  const question = '« Allow for this session » also allows every later gh ' + e.command + ' on '
+    + where + ' until the session ends. ' + describe(e) + '?'
   try {
-    if ((await $.ui.ask(question, ['Allow', 'Deny'])) === 'Allow') return undefined
+    const answer = await $.ui.ask(question, ['Allow', 'Allow for this session', 'Deny'])
+    if (answer === 'Allow') return undefined
+    if (answer === 'Allow for this session') {
+      sessionGrants.add(key)
+      return undefined
+    }
   } catch {
     return 'gh ' + e.command + ' needs permission and nobody could be asked'
   }
   return 'the user refused gh ' + e.command
+}
+
+async function ask($: any, question: string, options: string[], command: string): Promise<string | undefined> {
+  try {
+    if ((await $.ui.ask(question, options)) === options[0]) return undefined
+  } catch {
+    return 'gh ' + command + ' needs permission and nobody could be asked'
+  }
+  return 'the user refused gh ' + command
+}
+
+function describe(e: any): string {
+  const detail = JSON.stringify(e.args ?? {})
+  return 'Run gh ' + e.command + ' on ' + (e.repo || 'the origin repository') + ' with '
+    + (detail.length > 200 ? detail.slice(0, 199) + '…' : detail)
+}
+
+// The writes no session grant covers: a merge and a deletion are asked each
+// time, as neither can be taken back.
+export const NEVER_GRANTED = new Set(['pr-merge', 'comment-delete'])
+
+// The approvals WRITING.md reserves to the person, asked whatever a rule or
+// the mode allows: an existing description is never edited without the
+// operator's approval, and a pull request leaves draft only on his word.
+export function reservedToPerson(command: string, args: Record<string, unknown>): string | undefined {
+  if (command === 'pr-update' && typeof args.body === 'string') return 'Replace the description of an existing pull request:'
+  if (command === 'pr-ready') return 'Take a pull request out of draft:'
+  if (command === 'pr-create' && args.draft === false) return 'Open a pull request ready for review, not as a draft:'
+  return undefined
+}
+
+// Every pull request is opened as a draft unless the call says otherwise,
+// and saying otherwise is put to the person (reservedToPerson).
+export function withHouseDefaults(command: string, args: Record<string, unknown>): Record<string, unknown> {
+  if (command === 'pr-create' && (args.draft === undefined || args.draft === null)) return { ...args, draft: true }
+  return args
+}
+
+// A grant is the session's, the command's and the repository's: an explicit
+// repo by its name, the origin by the directory whose remote it is.
+async function grantKey($: any, e: any): Promise<string | undefined> {
+  try {
+    const session = await $.session.id()
+    const repo = e.repo ? 'repo:' + String(e.repo).toLowerCase() : 'origin:' + await $.session.cwd()
+    return session + '\n' + e.command + '\n' + repo
+  } catch {
+    // Without the session or its directory no grant can be scoped: ask.
+    return undefined
+  }
+}
+
+function fingerprint(e: any): string {
+  return JSON.stringify([e.command, e.repo ?? '', textFields(e.command, e.args ?? {})])
 }
 
 async function prText(
@@ -94,27 +187,34 @@ export function checksLine(pr: string, out: string): string {
   }
 }
 
-export type PaneRow = {
-  number: number
-  title: string
-  url: string
-  draft: boolean
-  // null when the PR was not looked up in detail, or the lookup failed.
-  comments: number | null
-  // SUCCESS, FAILURE or PENDING from checks-status; "?" when the checks could
-  // not be read, "–" past the PRs looked up in detail.
-  ci: string
-}
+export type PaneRow = GithubPaneRow
 
 // Each detailed PR costs two engine runs (its checks and its own record,
 // which alone carries the comment counts), so only the newest are detailed.
 export const DETAILED = 5
 
-let paneRows: PaneRow[] = []
+// How often the open pane reads its PRs again, for CI and review counts that
+// change with nobody asking: one pr-list and two runs per detailed PR, well
+// under GitHub's hourly limit.
+export const WATCH_MS = 60_000
+
+// The pane's rows live in the session's state: a reload of the module keeps
+// them, and a write redraws the pane with nobody invalidating it.
+const pane = atom({ plugin: 'github', key: 'pane' } as const, { rows: [], error: null, refreshing: false } as GithubPane)
+
 // Names this module registered; a taken name is left to its owner.
 const ownedCommands = new Set<string>()
-let paneError: string | undefined
+// The last prompt the user typed (at the terminal or through the bridge): a
+// text found in it verbatim is the user's own words, never refused.
+let lastTyped = ''
+// The texts refused once: the same text sent again goes to the person.
+const refusedOnce = new Set<string>()
+// The grants « Allow for this session » gave, by session, command and repository.
+// Kept in the module: a reload or a restart drops them, which only asks again.
+const sessionGrants = new Set<string>()
 let refreshing = false
+// The timer reading the PRs while the pane is open.
+let watch: { cancel: () => void } | undefined
 
 function ciColor(ci: string): string {
   if (ci === 'SUCCESS') return 'success'
@@ -123,15 +223,20 @@ function ciColor(ci: string): string {
   return 'inactive'
 }
 
-async function detail($: any, pr: number): Promise<{ ci: string; comments: number | null }> {
+async function detail($: any, pr: number): Promise<{ ci: string; failed: string[]; comments: number | null }> {
   const [checks, status] = await Promise.allSettled([
     runGh($, 'pr-checks', { pr, format: 'checks-status' }),
     runGh($, 'pr-status', { pr }),
   ])
   let ci = '?'
+  let failed: string[] = []
   let comments: number | null = null
   try {
-    if (checks.status === 'fulfilled') ci = String(JSON.parse(checks.value).result)
+    if (checks.status === 'fulfilled') {
+      const parsed = JSON.parse(checks.value)
+      ci = String(parsed.result)
+      failed = Array.isArray(parsed.failed_checks) ? parsed.failed_checks.map(String) : []
+    }
   } catch {
     // Unreadable checks stay "?": never shown as a state they are not.
   }
@@ -143,43 +248,94 @@ async function detail($: any, pr: number): Promise<{ ci: string; comments: numbe
   } catch {
     // Unreadable record: no count shown.
   }
-  return { ci, comments }
+  return { ci, failed, comments }
 }
 
-async function collectRows($: any): Promise<void> {
+async function collectRows($: any): Promise<PaneRow[]> {
   const prs = JSON.parse(await runGh($, 'pr-list')) as any[]
   const details = await Promise.all(
     prs.slice(0, DETAILED).map((p) => detail($, Number(p.number))),
   )
-  paneRows = prs.map((p, i) => ({
+  return prs.map((p, i) => ({
     number: p.number,
     title: String(p.title ?? ''),
     url: String(p.html_url ?? ''),
     draft: Boolean(p.draft),
     comments: details[i]?.comments ?? null,
     ci: details[i]?.ci ?? '–',
+    failed: details[i]?.failed ?? [],
   }))
+}
+
+// The CI changes worth a toast between two reads: a PR read in both whose
+// checks came to an end (SUCCESS or FAILURE) or changed from one end to the
+// other. A first read, an unreadable one and a PR new to the list say nothing.
+export function ciTransitions(before: PaneRow[], after: PaneRow[]): string[] {
+  const old = new Map(before.map((r) => [r.number, r.ci]))
+  const lines: string[] = []
+  for (const r of after) {
+    const was = old.get(r.number)
+    if (was === undefined || was === r.ci) continue
+    if (was === '?' || was === '–') continue
+    if (r.ci !== 'SUCCESS' && r.ci !== 'FAILURE') continue
+    lines.push('#' + r.number + ' CI: ' + r.ci + (r.failed.length > 0 ? ' (' + r.failed.join(', ') + ')' : ''))
+  }
+  return lines
 }
 
 async function refresh($: any): Promise<void> {
   if (refreshing) return
   refreshing = true
-  $.ui.invalidate('ui.render')
+  await update($, pane, (p) => ({ ...p, refreshing: true }))
   try {
-    await collectRows($)
-    paneError = undefined
+    const before = (await read($, pane)).rows
+    const rows = await collectRows($)
+    await update($, pane, (p) => ({ ...p, rows, error: null }))
+    for (const line of ciTransitions(before, rows)) $.ui.toast(line)
   } catch (err: any) {
     // The rows from the last good read stay on screen under the error.
-    paneError = String(err?.message ?? err).trim()
+    const error = String(err?.message ?? err).trim()
+    await update($, pane, (p) => ({ ...p, error }))
   } finally {
     refreshing = false
-    $.ui.invalidate('ui.render')
+    await update($, pane, (p) => ({ ...p, refreshing: false }))
   }
+}
+
+// One timer while the pane is open; a reload of the module cancels it with
+// the old copy, and the next /prs or Refresh starts it again.
+function startWatch($: any): void {
+  if (watch) return
+  watch = $.clock.every(WATCH_MS, () => {
+    void refresh($)
+  })
+}
+
+function stopWatch(): void {
+  watch?.cancel()
+  watch = undefined
 }
 
 function clip(text: string, max: number): string {
   const room = Math.max(1, max)
   return text.length > room ? text.slice(0, room - 1) + '…' : text
+}
+
+// install.sh's exit codes, the table commands/doctor.md gives in prose.
+export const DIAGNOSTIC: Record<number, string> = {
+  0: 'everything satisfied',
+  11: 'a system tool is missing: install python3 (3.9+) or curl',
+  12: 'no GitHub token: run gh auth login',
+  13: 'not a GitHub repository clone: run from one, or check the origin remote',
+}
+
+// install.sh run in the session's directory, its output verbatim and its exit
+// code named. The script writes nothing.
+export async function diagnose($: any): Promise<string> {
+  const r = await $.process.run(['bash', $.plugin.root + '/install.sh'], { timeoutMs: 60_000 })
+  const out = [r.stdout, r.stderr].map((t: string) => (t ?? '').trimEnd()).filter(Boolean).join('\n')
+  const meaning = DIAGNOSTIC[r.exitCode] ?? 'an unexpected failure'
+  return out + '\n\nExit code ' + r.exitCode + ': ' + meaning + '.'
 }
 
 export function register(on: any): void {
@@ -227,11 +383,21 @@ export function register(on: any): void {
     return next(e)
   }).catch(async (_$: any, e: any, next: any) => next(e))
 
-  on('tool.call', { tool: TOOL }, async ($: any, e: any) => {
+  on('prompt.submit', async (_$: any, e: any, next: any) => {
+    const kind = String(e.origin?.kind ?? '')
+    if (kind === 'composer' || kind === 'bridge') lastTyped = String(e.text ?? '')
+    return next(e)
+  }).catch(async (_$: any, e: any, next: any) => next(e))
+
+  on('tool.call', { tool: TOOL }, async ($: any, raw: any) => {
+    const e = { ...raw, args: withHouseDefaults(raw.command, raw.args ?? {}) }
     const refused = await permit($, e)
     if (refused) return { deny: refused }
     try {
-      return { result: await runGh($, e.command, e.args ?? {}, e.repo) || '(no output)' }
+      const result = await runGh($, e.command, e.args, e.repo) || '(no output)'
+      // A write changes what the open pane shows: read it again, unawaited.
+      if (watch && !READS.has(e.command)) void refresh($)
+      return { result }
     } catch (err: any) {
       return { result: String(err?.message ?? err), isError: true }
     }
@@ -258,22 +424,36 @@ export function register(on: any): void {
   on('command.run', { command: 'prs' }, async ($: any, e: any, next: any) => {
     if (!ownedCommands.has('prs')) return next(e)
     try {
-      await collectRows($)
-      paneError = undefined
+      const rows = await collectRows($)
+      await update($, pane, (p) => ({ ...p, rows, error: null }))
       await $.ui.open({ id: PANE_ID, title: 'PRs', closeOnEscape: true })
+      startWatch($)
       return {}
     } catch (err: any) {
       return { text: String(err?.message ?? err) }
     }
   }).catch(async () => ({ text: 'github mod: /prs failed; the mod itself errored' }))
 
+  // The markdown commands answered here without a model turn. A failure falls
+  // back to the markdown, which runs the same script through the model.
+  on('command.run', { command: 'github:install' }, async ($: any) => ({ text: await diagnose($) }))
+    .catch(async (_$: any, e: any, next: any) => next(e))
+  on('command.run', { command: 'github:doctor' }, async ($: any) => ({ text: await diagnose($) }))
+    .catch(async (_$: any, e: any, next: any) => next(e))
+
+  on('ui.close', async (_$: any, e: any, next: any) => {
+    if (e.id === PANE_ID) stopWatch()
+    return next(e)
+  }).catch(async (_$: any, e: any, next: any) => next(e))
+
   on('ui.render', { component: 'Pane' }, async ($: any, e: any, next: any) => {
     if (e.requestId !== PANE_ID) return next(e)
     const { Box, Text, Button, Link } = $.ui.resolve(e)
     const width = e.props?.bodyColumns ?? 80
-    const rows = paneRows.length === 0
-      ? [Text({ key: 'empty', children: [refreshing ? 'Loading…' : 'No open PRs'] })]
-      : paneRows.map((r) =>
+    const state = await read($, pane)
+    const rows = state.rows.length === 0
+      ? [Text({ key: 'empty', children: [state.refreshing ? 'Loading…' : 'No open PRs'] })]
+      : state.rows.map((r) =>
           Box({
             key: 'pr-' + r.number,
             flexDirection: 'row',
@@ -296,11 +476,14 @@ export function register(on: any): void {
       flexDirection: 'column',
       children: [
         ...rows,
-        ...(paneError ? [Text({ key: 'error', color: 'error', children: [paneError] })] : []),
+        ...(state.error ? [Text({ key: 'error', color: 'error', children: [state.error] })] : []),
         Button({
           key: 'refresh',
-          label: refreshing ? 'Refreshing…' : 'Refresh',
-          onPress: () => refresh($),
+          label: state.refreshing ? 'Refreshing…' : 'Refresh',
+          onPress: () => {
+            startWatch($)
+            return refresh($)
+          },
         }),
       ],
     })
