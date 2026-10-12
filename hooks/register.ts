@@ -111,6 +111,8 @@ export type PaneRow = {
 export const DETAILED = 5
 
 let paneRows: PaneRow[] = []
+// Names this module registered; a taken name is left to its owner.
+const ownedCommands = new Set<string>()
 let paneError: string | undefined
 let refreshing = false
 
@@ -208,6 +210,7 @@ export function register(on: any): void {
         required: ['command'],
       },
     })
+    ownedCommands.clear()
     // Commands last: a taken name throws and would skip the rest of the hook.
     for (const spec of [
       { name: 'checks', description: 'CI status of a PR (default: the current branch\'s)', argumentHint: '[pr]' },
@@ -216,6 +219,7 @@ export function register(on: any): void {
     ]) {
       try {
         await $.command.register(spec)
+        ownedCommands.add(spec.name)
       } catch {
         // Name already taken by another plugin; skip it.
       }
@@ -233,7 +237,8 @@ export function register(on: any): void {
     }
   }).catch(async () => ({ deny: 'github mod error: the hook itself failed' }))
 
-  on('command.run', { command: 'checks' }, async ($: any, e: any) => {
+  on('command.run', { command: 'checks' }, async ($: any, e: any, next: any) => {
+    if (!ownedCommands.has('checks')) return next(e)
     try {
       return { text: await prText($, e.args, 'pr-checks', 'checks-status', checksLine) }
     } catch (err: any) {
@@ -241,7 +246,8 @@ export function register(on: any): void {
     }
   }).catch(async () => ({ text: 'github mod: /checks failed; the mod itself errored' }))
 
-  on('command.run', { command: 'threads' }, async ($: any, e: any) => {
+  on('command.run', { command: 'threads' }, async ($: any, e: any, next: any) => {
+    if (!ownedCommands.has('threads')) return next(e)
     try {
       return { text: await prText($, e.args, 'pr-threads', 'thread-summary') }
     } catch (err: any) {
@@ -249,7 +255,8 @@ export function register(on: any): void {
     }
   }).catch(async () => ({ text: 'github mod: /threads failed; the mod itself errored' }))
 
-  on('command.run', { command: 'prs' }, async ($: any, _e: any) => {
+  on('command.run', { command: 'prs' }, async ($: any, e: any, next: any) => {
+    if (!ownedCommands.has('prs')) return next(e)
     try {
       await collectRows($)
       paneError = undefined

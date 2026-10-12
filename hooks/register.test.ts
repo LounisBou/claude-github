@@ -23,6 +23,27 @@ test('session.start registers the gh tool and the three commands', async ($, on)
   expect(registered).toContain('cmd:prs')
 })
 
+test('a command name another plugin owns passes through to next', async ($, on) => {
+  const runs: any[] = []
+  on('session.start', () => ({ cwd: '/work' }))
+  on('tool.register', () => ({ value: undefined }))
+  on('command.register', (_$, e) => {
+    if (e.name === 'checks') throw new Error('name taken')
+    return { value: undefined }
+  })
+  on('process.run', (_$, e) => {
+    runs.push(e)
+    return { exitCode: 0, stdout: '', stderr: '' }
+  })
+  on('command.run', { command: 'checks' }, () => ({ text: 'other plugin answer' }))
+
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.command.run({ command: 'checks', args: '' })
+  expect(out.text).toBe('other plugin answer')
+  expect(runs.length).toBe(0)
+})
+
 // reply: a fixed { exitCode, stdout, stderr } value, or a function (e) => value
 // for sequenced replies. Registered once per test — never register a second
 // process.run stub afterwards; pass a function instead.
