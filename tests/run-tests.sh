@@ -1153,7 +1153,7 @@ check "WRITING.md headings are in order" \
 check "REFERENCE.md points at WRITING.md" "1" \
   "$(grep -cF 'read `WRITING.md` beside this file' "$SKILLDOC")"
 
-for needle in '--draft' '**TODO Staging:**' '**TODO Prod:**' '**PRs Dependency:**' '**Related PRs:**' 'one `- ` bullet per item' 'follow-up' 'mandatory' 'kept apart' 'no semicolon' 'never edited without' 'heading'; do
+for needle in '--draft' '**TODO Staging:**' '**TODO Prod:**' '**PRs Dependency:**' '**Related PRs:**' 'TODO Staging or TODO Prod item is a task-list checkbox' 'follow-up' 'mandatory' 'kept apart' 'no semicolon' 'never edited without' 'heading'; do
   check "WRITING.md mentions '$needle'" "1" \
     "$(grep -qF -- "$needle" "$WRITINGDOC" && echo 1 || echo 0)"
 done
