@@ -31,13 +31,31 @@ Add the marketplace, then install the plugin:
   engine's `error:` line; exit codes 1–5 are documented in
   `engine/REFERENCE.md`. Calls follow the session's permission rules: a
   `deny` rule refuses, reads run unless a rule asks, and every write asks
-  first unless a rule or the permission mode allows it.
+  first unless a rule or the permission mode allows it. The dialog offers
+  « Allow for this session », which covers that one command on that one
+  repository until the session ends; it is never offered for `pr-merge` or
+  `comment-delete`, nor where an explicit rule asks.
+- **Writing rules enforced** — before a title, a description or a comment
+  leaves the machine, the mod checks the mechanical rules of
+  `engine/WRITING.md`: no semicolon in prose (code spans, fenced blocks and
+  URLs are not prose), no `Co-Authored-By` or `Claude-Session` trailer, a
+  title on one line and within 72 characters, no heading in a PR description.
+  A text that breaks one is refused with the rule, so it can be rewritten. A
+  text the user typed in the prompt passes, and the same text sent again is
+  put to the user. `pr-create` opens a draft unless the call says otherwise,
+  and leaving draft (`draft: false`, `pr-ready`) or replacing an existing
+  description is always asked, whatever the rules allow.
 - **`/checks [pr]`** — combined CI status of a PR, with the failed checks
   named, defaulting to the current branch's.
 - **`/threads [pr]`** — the open review threads of a PR, as a markdown table.
 - **`/prs`** — opens a pane listing every open PR: number, title and draft
   flag, plus CI state and comment count for the five newest, with a Refresh
-  button.
+  button. While it is open it reads the PRs again every minute and after each
+  write through the tool, and a toast says when a PR's CI ends in success or
+  failure.
+- **`/github:install`, `/github:doctor`** — run the dependency diagnostic and
+  name its exit code with no model turn; where mods do not load, the markdown
+  commands run the same script.
 
 The engine (`engine/gh.py` + `ghlib/`) is plain Python standard library; the
 mod (`hooks/register.ts`) is TypeScript loaded directly by Claude Code — no
