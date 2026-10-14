@@ -466,6 +466,19 @@ test('a heading in a pull request description is refused, a hash in a comment or
   expect(lint('pr-create', { title: 't', body: 'Fixes #12\n#hashtag\n```sh\n# a shell comment\n```' })).toEqual([])
 })
 
+test('a TODO item that points to another or joins two actions is refused, two full items are not', () => {
+  const alone = 'a TODO item stands alone, it never points to another item'
+  const one = 'one checkbox, one action: an edit and the restart, reload or deploy that applies it are two checkboxes, never joined by « then » or « and run »'
+  const before = 'Lowers the pool.\n\n**TODO Prod:**\n- [ ] Set `size=1000` instead of `size=30000` in `FREDDIE_TRANSPORT_DSN` of the staging `/etc/caddy/caddy.env`, then run `sudo systemctl reload caddy`\n- [ ] Do the same edit on prod-01 to prod-05 and run `sudo systemctl reload caddy` on each'
+  expect(rulesOf('pr-create', { title: 't', body: before })).toEqual(['body: ' + alone, 'body: ' + one])
+  expect(rulesOf('pr-update', { pr: 1, body: '**TODO Staging:**\n- [ ] Same as above on staging' })).toEqual(['body: ' + alone])
+  expect(rulesOf('pr-update', { pr: 1, body: '**TODO Staging:**\n- [ ] Run the migration and run the seeder' })).toEqual(['body: ' + one])
+  const after = 'Lowers the pool.\n\n**TODO Prod:**\n- [ ] Set `size=1000` instead of `size=30000` in `FREDDIE_TRANSPORT_DSN` of `/etc/caddy/caddy.env` on prod-01 to prod-05\n- [ ] Run `sudo systemctl reload caddy` on prod-01 to prod-05 to restart the Freddie workers'
+  expect(lint('pr-create', { title: 't', body: after })).toEqual([])
+  // Outside a TODO section, and inside code spans, the same words are prose like any other.
+  expect(lint('pr-create', { title: 't', body: 'Reads the file, then caches it, the same as before.\n\n**TODO Prod:**\n- [ ] Set `mode=then` in `app.env` on prod-01' })).toEqual([])
+})
+
 test('an attribution trailer is refused, Signed-off-by is not', () => {
   expect(rulesOf('pr-create', { title: 't', body: 'Text\n\nCo-Authored-By: someone <a@b.c>' })[0]).toContain('no trailer')
   expect(rulesOf('thread-reply', { thread_id: 'x', body: 'ok\nclaude-session: 123' })[0]).toContain('no trailer')

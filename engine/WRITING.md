@@ -67,7 +67,11 @@ a prerequisite positively ("X must have Y set", not "it will fail without Y").
 The four sections come after the summary text, in that order, each in that exact shape
 whatever the number of items: the bold label alone on its line, then one item per line,
 nothing else on the line. A TODO Staging or TODO Prod item is a task-list checkbox, `- [ ] <step>`,
-never a bare `- ` bullet: the operator ticks it as the step is done. A PRs Dependency or Related PRs
+never a bare `- ` bullet: the operator ticks it as the step is done. A TODO item stands alone:
+it never points to another item ("do the same edit", "same as above", "likewise") and writes
+the action in full, the file, the value before and after, and the host or environment. One
+checkbox, one action: an edit and the restart, reload, deploy or migration that applies it are
+two checkboxes, never joined by "then" or "and run". A PRs Dependency or Related PRs
 item is a `- ` bullet — the line break and the dash are what keep
 GitHub's preview rendering every link as a pull request card. Never a heading, never a
 link inline after the label. Every section is optional and present only when needed,
