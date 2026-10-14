@@ -325,14 +325,16 @@ function clip(text: string, max: number): string {
 export const DIAGNOSTIC: Record<number, string> = {
   0: 'everything satisfied',
   11: 'a system tool is missing: install python3 (3.9+) or curl',
-  12: 'no GitHub token: run gh auth login',
-  13: 'not a GitHub repository clone: run from one, or check the origin remote',
+  12: 'no GitHub token: run /github:install',
+  14: 'GitHub sign-in started: enter the code above in the browser, then run /github:doctor',
 }
 
 // install.sh run in the session's directory, its output verbatim and its exit
-// code named. The script writes nothing.
-export async function diagnose($: any): Promise<string> {
-  const r = await $.process.run(['bash', $.plugin.root + '/install.sh'], { timeoutMs: 60_000 })
+// code named. /github:install lets it install gh and start the browser
+// sign-in, which can take minutes; /github:doctor only checks (--check).
+export async function diagnose($: any, check = false): Promise<string> {
+  const argv = ['bash', $.plugin.root + '/install.sh', ...(check ? ['--check'] : [])]
+  const r = await $.process.run(argv, { timeoutMs: check ? 60_000 : 600_000 })
   const out = [r.stdout, r.stderr].map((t: string) => (t ?? '').trimEnd()).filter(Boolean).join('\n')
   const meaning = DIAGNOSTIC[r.exitCode] ?? 'an unexpected failure'
   return out + '\n\nExit code ' + r.exitCode + ': ' + meaning + '.'
@@ -438,7 +440,7 @@ export function register(on: any): void {
   // back to the markdown, which runs the same script through the model.
   on('command.run', { command: 'github:install' }, async ($: any) => ({ text: await diagnose($) }))
     .catch(async (_$: any, e: any, next: any) => next(e))
-  on('command.run', { command: 'github:doctor' }, async ($: any) => ({ text: await diagnose($) }))
+  on('command.run', { command: 'github:doctor' }, async ($: any) => ({ text: await diagnose($, true) }))
     .catch(async (_$: any, e: any, next: any) => next(e))
 
   on('ui.close', async (_$: any, e: any, next: any) => {

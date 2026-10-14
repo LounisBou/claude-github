@@ -1,8 +1,9 @@
 # claude-github
 
 A Claude Code mod that talks to the GitHub API through one native tool and a PR
-pane, over a Python 3.9+ standard-library engine. No `gh` CLI needed at runtime,
-no third-party packages, no npm dependencies in the mod.
+pane, over a Python 3.9+ standard-library engine. No third-party packages and no
+npm dependencies in the mod: `gh` only supplies the GitHub token, unless
+`GH_TOKEN` is set.
 
 The tool, the commands and the pane need Claude Code v2.1.287 or later with
 mods enabled (tested against 2.1.292). Where mods do not load (`claude -p`, an
@@ -18,6 +19,14 @@ Add the marketplace, then install the plugin:
 /plugin marketplace add LounisBou/claude-github
 /plugin install github@claude-github
 ```
+
+Then run `/github:install`. When no GitHub token is found, it installs `gh` if it
+is missing (Homebrew on macOS; on Linux the system package manager when it runs
+without a password, otherwise the official release archive, checked against its published
+sha256 checksum, into `~/.local/bin`) and starts `gh auth login --web`: the GitHub device page opens in the browser
+and the command prints the one-time code to enter there. The token stays in the
+system credential store where `gh` keeps it; the plugin never prints or writes
+it. `/github:doctor` then confirms everything is ready.
 
 ## What you get
 
@@ -53,9 +62,10 @@ Add the marketplace, then install the plugin:
   button. While it is open it reads the PRs again every minute and after each
   write through the tool, and a toast says when a PR's CI ends in success or
   failure.
-- **`/github:install`, `/github:doctor`** — run the dependency diagnostic and
-  name its exit code with no model turn; where mods do not load, the markdown
-  commands run the same script.
+- **`/github:install`, `/github:doctor`** — set up `gh` and its sign-in
+  (install only), run the dependency diagnostic and name its exit code with no
+  model turn; where mods do not load, the markdown commands run the same
+  script.
 
 The engine (`engine/gh.py` + `ghlib/`) is plain Python standard library; the
 mod (`hooks/register.ts`) is TypeScript loaded directly by Claude Code — no

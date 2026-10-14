@@ -908,10 +908,13 @@ test('/github:doctor runs install.sh and names its exit code, with no model turn
 
   for (const command of ['github:doctor', 'github:install']) {
     const out: any = await $.command.run({ command, args: '' })
-    expect(out.text).toBe('github: no token\ngithub: not ready.\n\nExit code 12: no GitHub token: run gh auth login.')
+    expect(out.text).toBe('github: no token\ngithub: not ready.\n\nExit code 12: no GitHub token: run /github:install.')
   }
   expect(runs[0][0]).toBe('bash')
   expect(runs[0][1].endsWith('/install.sh')).toBe(true)
+  // doctor only checks; install may install gh and start the sign-in.
+  expect(runs[0].slice(2)).toEqual(['--check'])
+  expect(runs[1].slice(2)).toEqual([])
 })
 
 test('/github:doctor falls back to the markdown command when the script cannot run', async ($, on) => {

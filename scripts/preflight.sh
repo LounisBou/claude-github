@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Refuse to run when a dependency is missing, so no skill degrades silently.
+#
+#   preflight.sh              dependencies, then the GitHub repository clone
+#   preflight.sh --deps-only  dependencies only: /github:install and
+#                             /github:doctor need no repository
 set -u
+
+DEPS_ONLY=0
+[ "${1:-}" = "--deps-only" ] && DEPS_ONLY=1
 
 die() {
   printf 'error: %s\n' "$1" >&2
@@ -18,18 +25,23 @@ PY
 
 command -v curl >/dev/null 2>&1 || die "curl not found on PATH" "install curl" 11
 
-# ── Repository ────────────────────────────────────────────────
-remote=$(git remote get-url origin 2>/dev/null || echo "")
-[ -n "$remote" ] || die "no git remote named origin" "run this from a GitHub repository clone" 13
-case "$remote" in
-  *github.com*) : ;;
-  *) die "origin is not a github.com remote: $remote" "run this from a GitHub repository clone" 13 ;;
-esac
+# ── Repository (skipped by --deps-only) ───────────────────────
+if [ "$DEPS_ONLY" != 1 ]; then
+  remote=$(git remote get-url origin 2>/dev/null || echo "")
+  [ -n "$remote" ] || die "no git remote named origin" "run this from a GitHub repository clone" 13
+  case "$remote" in
+    *github.com*) : ;;
+    *) die "origin is not a github.com remote: $remote" "run this from a GitHub repository clone" 13 ;;
+  esac
+fi
 
 # ── GitHub token ──────────────────────────────────────────────
-if [ "${GH_SKIP_AUTH:-0}" != "1" ]; then
-  token="${GH_TOKEN:-$(gh auth token 2>/dev/null || echo "")}"
-  [ -n "$token" ] || die "no GitHub token available" "gh auth login" 12
+# Asked through gh's exit code only: the token itself is never read here. gh is
+# looked up on PATH, then where /github:install puts its release archive.
+if [ "${GH_SKIP_AUTH:-0}" != "1" ] && [ -z "${GH_TOKEN:-}" ]; then
+  gh=$(command -v gh 2>/dev/null || echo "$HOME/.local/bin/gh")
+  [ -x "$gh" ] || die "gh is not installed and GH_TOKEN is not set" "/github:install" 12
+  "$gh" auth token >/dev/null 2>&1 || die "no GitHub token available" "/github:install" 12
 fi
 
 exit 0
