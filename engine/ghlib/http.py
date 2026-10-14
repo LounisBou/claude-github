@@ -6,6 +6,7 @@ is opened, which is what lets the suite run offline.
 
 import json
 import os
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -20,14 +21,16 @@ _MAX_RETRIES = 3
 def token():
     tok = os.environ.get("GH_TOKEN")
     if not tok:
+        # gh on PATH, else where /github:install puts its release archive.
+        gh = shutil.which("gh") or os.path.expanduser("~/.local/bin/gh")
         try:
             tok = subprocess.run(
-                ["gh", "auth", "token"], capture_output=True, text=True, check=False
+                [gh, "auth", "token"], capture_output=True, text=True, check=False
             ).stdout.strip()
         except OSError:
             tok = ""
     if not tok:
-        raise errors.AuthError("no GitHub token; run: gh auth login")
+        raise errors.AuthError("no GitHub token; run /github:install")
     return tok
 
 

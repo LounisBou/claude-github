@@ -27,9 +27,12 @@ case "$remote" in
 esac
 
 # ── GitHub token ──────────────────────────────────────────────
-if [ "${GH_SKIP_AUTH:-0}" != "1" ]; then
-  token="${GH_TOKEN:-$(gh auth token 2>/dev/null || echo "")}"
-  [ -n "$token" ] || die "no GitHub token available" "gh auth login" 12
+# Asked through gh's exit code only: the token itself is never read here. gh is
+# looked up on PATH, then where /github:install puts its release archive.
+if [ "${GH_SKIP_AUTH:-0}" != "1" ] && [ -z "${GH_TOKEN:-}" ]; then
+  gh=$(command -v gh 2>/dev/null || echo "$HOME/.local/bin/gh")
+  [ -x "$gh" ] || die "gh is not installed and GH_TOKEN is not set" "/github:install" 12
+  "$gh" auth token >/dev/null 2>&1 || die "no GitHub token available" "/github:install" 12
 fi
 
 exit 0

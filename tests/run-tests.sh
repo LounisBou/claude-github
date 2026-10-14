@@ -1219,6 +1219,186 @@ check "both commands declare a description" "2" \
 check "no uninstall script exists" "" \
   "$(ls "$ROOT/uninstall.sh" 2>/dev/null || true)"
 
+echo "== install: gh and its browser sign-in =="
+
+# Every external command install.sh may run is faked: nothing is installed and
+# no browser opens. PATH holds only the fakes and a few links to system tools,
+# so a real gh or brew on this machine is never found.
+SYS="$WORK/sysbin"
+mkdir -p "$SYS"
+for t in bash sh git curl sed awk head mktemp seq nohup sleep rm cp chmod mkdir tar cat grep tr dirname env ls touch shasum sha256sum; do
+  p=$(command -v "$t") && ln -sf "$p" "$SYS/$t" || :
+done
+# The interpreter itself, not a version-manager shim that needs its own PATH.
+ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "$SYS/python3"
+
+# A token value the fake gh holds once signed in. It must never reach output.
+SECRET="gho_FAKESECRET0123456789"
+
+# new_fakes <dir>: an empty fake-bin directory with a call log.
+new_fakes() {
+  rm -rf "$1" && mkdir -p "$1" && : > "$1/calls.log"
+  # open / xdg-open: log the URL instead of starting a browser.
+  for t in open xdg-open; do
+    printf '#!/bin/sh\necho "%s $*" >> "%s/calls.log"\n' "$t" "$1" > "$1/$t"
+    chmod +x "$1/$t"
+  done
+  printf '#!/bin/sh\nexit 1\n' > "$1/sudo" && chmod +x "$1/sudo"
+}
+
+# fake_gh <file> <dir>: a gh with no token until "$dir/authed" exists. Its
+# login prints a one-time code the way gh does without a terminal.
+fake_gh() {
+  cat > "$1" <<GH
+#!/bin/sh
+echo "gh \$*" >> "$2/calls.log"
+case "\$1 \$2" in
+  "auth token") [ -f "$2/authed" ] && { echo "$SECRET"; exit 0; }; exit 1 ;;
+  "auth login") echo "! First copy your one-time code: ABCD-1234" >&2
+                echo "Open this URL to continue in your web browser: https://github.com/login/device" >&2 ;;
+esac
+GH
+  chmod +x "$1"
+}
+
+# fake_uname <dir> <system> <machine>
+fake_uname() {
+  printf '#!/bin/sh\ncase "$1" in -m) echo %s ;; *) echo %s ;; esac\n' "$3" "$2" > "$1/uname"
+  chmod +x "$1/uname"
+}
+
+# run_install <dir> <home> [args...]: install.sh from the GitHub clone.
+run_install() {
+  local dir="$1" home="$2"
+  shift 2
+  env -u GH_TOKEN HOME="$home" PATH="$dir:$SYS" \
+    /bin/bash -c "cd '$WORK/repo' && /bin/bash '$ROOT/install.sh' $*" </dev/null 2>&1
+}
+
+# macOS, no gh: Homebrew installs it, then the sign-in starts.
+F="$WORK/fk-mac"
+new_fakes "$F"
+fake_uname "$F" Darwin arm64
+cat > "$F/brew" <<BREW
+#!/bin/sh
+echo "brew \$*" >> "$F/calls.log"
+BREW
+printf 'cp "%s/gh.src" "%s/gh"\n' "$F" "$F" >> "$F/brew"
+chmod +x "$F/brew"
+fake_gh "$F/gh.src" "$F"
+out=$(run_install "$F" "$WORK/home-mac"); code=$?
+check "missing gh on macOS: brew install gh" "brew install gh" "$(grep '^brew' "$F/calls.log")"
+check "missing gh on macOS: web sign-in started" "gh auth login --web --git-protocol https --hostname github.com" \
+  "$(grep '^gh auth login' "$F/calls.log")"
+check "sign-in opens the device page" "open https://github.com/login/device" "$(grep '^open' "$F/calls.log")"
+check "sign-in prints the one-time code" "1" "$(printf '%s' "$out" | grep -c 'ABCD-1234')"
+check "sign-in started exits 14" "14" "$code"
+
+# gh present, no token: nothing installed, the sign-in starts.
+F="$WORK/fk-notoken"
+new_fakes "$F"
+fake_uname "$F" Darwin arm64
+printf '#!/bin/sh\necho "brew $*" >> "%s/calls.log"\n' "$F" > "$F/brew" && chmod +x "$F/brew"
+fake_gh "$F/gh" "$F"
+out=$(run_install "$F" "$WORK/home-notoken"); code=$?
+check "no token: brew not run" "" "$(grep '^brew' "$F/calls.log")"
+check "no token: gh auth login --web run" "gh auth login --web --git-protocol https --hostname github.com" \
+  "$(grep '^gh auth login' "$F/calls.log")"
+check "no token: exits 14" "14" "$code"
+
+# Token present: nothing installed, no sign-in, no browser, and the token
+# never shows.
+touch "$F/authed"
+: > "$F/calls.log"
+out=$(run_install "$F" "$WORK/home-notoken"); code=$?
+check "token present: exits 0" "0" "$code"
+check "token present: only asks gh whether a token exists" "" \
+  "$(grep -v '^gh auth token' "$F/calls.log")"
+check "token present: the token never appears in output" "0" "$(printf '%s' "$out" | grep -c "$SECRET")"
+
+# --check (/github:doctor) installs nothing and starts no sign-in.
+F="$WORK/fk-check"
+new_fakes "$F"
+fake_uname "$F" Darwin arm64
+printf '#!/bin/sh\necho "brew $*" >> "%s/calls.log"\n' "$F" > "$F/brew" && chmod +x "$F/brew"
+out=$(run_install "$F" "$WORK/home-check" --check); code=$?
+check "--check without gh: nothing run" "" "$(cat "$F/calls.log")"
+check "--check without gh: exits 12" "12" "$code"
+check "--check without gh: names /github:install" "fix:   /github:install" "$(printf '%s' "$out" | grep '^fix:')"
+
+# Linux without root: the release archive lands in ~/.local/bin.
+F="$WORK/fk-linux"
+new_fakes "$F"
+fake_uname "$F" Linux x86_64
+printf '#!/bin/sh\necho 1000\n' > "$F/id" && chmod +x "$F/id"
+printf '#!/bin/sh\necho "apt-get $*" >> "%s/calls.log"\n' "$F" > "$F/apt-get" && chmod +x "$F/apt-get"
+mkdir -p "$WORK/rel/gh_9.9.9_linux_amd64/bin"
+fake_gh "$WORK/rel/gh_9.9.9_linux_amd64/bin/gh" "$F"
+tar -czf "$WORK/rel/gh.tar.gz" -C "$WORK/rel" gh_9.9.9_linux_amd64
+sum=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$WORK/rel/gh.tar.gz")
+printf '%s  gh_9.9.9_linux_amd64.tar.gz\n' "$sum" > "$WORK/rel/checksums.txt"
+cat > "$F/curl" <<CURL
+#!/bin/sh
+echo "curl \$*" >> "$F/calls.log"
+out=""; url=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in -o) out="\$2"; shift ;; -*) ;; *) url="\$1" ;; esac
+  shift
+done
+case "\$url" in
+  */releases/latest) echo '{"tag_name": "v9.9.9"}' ;;
+  */gh_9.9.9_linux_amd64.tar.gz) cp "$WORK/rel/gh.tar.gz" "\$out" ;;
+  */gh_9.9.9_checksums.txt) cp "$WORK/rel/checksums.txt" "\$out" ;;
+  *) exit 22 ;;
+esac
+CURL
+chmod +x "$F/curl"
+out=$(run_install "$F" "$WORK/home-linux"); code=$?
+check "Linux without root: gh in ~/.local/bin" "executable" \
+  "$([ -x "$WORK/home-linux/.local/bin/gh" ] && echo executable || echo missing)"
+check "Linux without root: package manager not run" "" "$(grep '^apt-get' "$F/calls.log")"
+check "Linux without root: sign-in started" "gh auth login --web --git-protocol https --hostname github.com" \
+  "$(grep '^gh auth login' "$F/calls.log")"
+check "Linux opens the device page with xdg-open" "xdg-open https://github.com/login/device" \
+  "$(rm -f "$F/open"; : > "$F/calls.log"; run_install "$F" "$WORK/home-linux" >/dev/null; grep '^xdg-open' "$F/calls.log")"
+
+# A checksum mismatch, or no checksum line for the archive, installs nothing.
+for case in mismatch missing; do
+  if [ "$case" = mismatch ]; then
+    printf '%s  gh_9.9.9_linux_amd64.tar.gz\n' "$(printf '0%.0s' $(seq 1 64))" > "$WORK/rel/checksums.txt"
+  else
+    printf '%s  gh_9.9.9_linux_arm64.tar.gz\n' "$sum" > "$WORK/rel/checksums.txt"
+  fi
+  : > "$F/calls.log"
+  out=$(run_install "$F" "$WORK/home-$case"); code=$?
+  check "checksum $case: ~/.local/bin/gh absent" "absent" \
+    "$([ -e "$WORK/home-$case/.local/bin/gh" ] && echo present || echo absent)"
+  check "checksum $case: refused with exit 11" "11" "$code"
+  check "checksum $case: no sign-in" "" "$(grep '^gh auth login' "$F/calls.log")"
+done
+
+# Linux as root: the system package manager installs gh.
+F="$WORK/fk-root"
+new_fakes "$F"
+fake_uname "$F" Linux x86_64
+printf '#!/bin/sh\necho 0\n' > "$F/id" && chmod +x "$F/id"
+fake_gh "$F/gh.src" "$F"
+printf '#!/bin/sh\necho "apt-get $*" >> "%s/calls.log"\ncp "%s/gh.src" "%s/gh"\n' "$F" "$F" "$F" > "$F/apt-get"
+chmod +x "$F/apt-get"
+out=$(run_install "$F" "$WORK/home-root"); code=$?
+check "Linux as root: apt-get install -y gh" "apt-get install -y gh" "$(grep '^apt-get' "$F/calls.log")"
+
+# The engine's own message, when a call needs a token and finds none.
+F="$WORK/fk-engine"
+new_fakes "$F"
+fake_gh "$F/gh" "$F"
+check "engine without a token names /github:install" "error: no GitHub token; run /github:install" \
+  "$(env -u GH_TOKEN HOME="$WORK/home-engine" PATH="$F:$SYS" python3 "$ROOT/engine/gh.py" auth-check 2>&1 | grep '^error:')"
+
+# preflight's fix line for a missing token.
+check "preflight without a token names /github:install" "fix:   /github:install" \
+  "$(env -u GH_TOKEN HOME="$WORK/home-engine" PATH="$F:$SYS" /bin/bash -c "cd '$WORK/repo' && /bin/bash '$ROOT/scripts/preflight.sh'" 2>&1 | grep '^fix:')"
+
 echo "== doctor.md matches the retired exit code =="
 
 check "doctor.md documents no exit 10" "" \
