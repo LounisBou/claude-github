@@ -190,7 +190,7 @@ fi
 # branch leaves $? at 0 when the condition fails, so reading it after the fi
 # would report success for a failed check — in the one script whose whole job
 # is to report that failure.
-bash "$ROOT/scripts/preflight.sh"
+bash "$ROOT/scripts/preflight.sh" --deps-only
 code=$?
 
 if [ "$code" -eq 0 ]; then

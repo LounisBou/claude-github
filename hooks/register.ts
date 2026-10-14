@@ -326,7 +326,6 @@ export const DIAGNOSTIC: Record<number, string> = {
   0: 'everything satisfied',
   11: 'a system tool is missing: install python3 (3.9+) or curl',
   12: 'no GitHub token: run /github:install',
-  13: 'not a GitHub repository clone: run from one, or check the origin remote',
   14: 'GitHub sign-in started: enter the code above in the browser, then run /github:doctor',
 }
 

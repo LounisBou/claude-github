@@ -1399,6 +1399,31 @@ check "engine without a token names /github:install" "error: no GitHub token; ru
 check "preflight without a token names /github:install" "fix:   /github:install" \
   "$(env -u GH_TOKEN HOME="$WORK/home-engine" PATH="$F:$SYS" /bin/bash -c "cd '$WORK/repo' && /bin/bash '$ROOT/scripts/preflight.sh'" 2>&1 | grep '^fix:')"
 
+echo "== install and doctor need no repository =="
+
+# Outside any git repository, with the sign-in present: both succeed.
+F="$WORK/fk-norepo"
+new_fakes "$F"
+fake_gh "$F/gh" "$F"
+touch "$F/authed"
+mkdir -p "$WORK/plain-dir"
+for args in "" "--check"; do
+  check "install.sh${args:+ $args} outside a repository exits 0" "0" \
+    "$(env -u GH_TOKEN HOME="$WORK/home-norepo" PATH="$F:$SYS" \
+      /bin/bash -c "cd '$WORK/plain-dir' && /bin/bash '$ROOT/install.sh' $args" </dev/null >/dev/null 2>&1; echo $?)"
+done
+
+# A call that works on a repository still refuses outside one, with its pair.
+out=$(env -u GH_TOKEN HOME="$WORK/home-norepo" PATH="$F:$SYS" \
+  /bin/bash -c "cd '$WORK/plain-dir' && /bin/bash '$ROOT/scripts/preflight.sh'" 2>&1); code=$?
+check "preflight outside a repository exits 13" "13" "$code"
+check "preflight outside a repository names the remedy" \
+  "error: no git remote named origin⏎fix:   run this from a GitHub repository clone" \
+  "$(printf '%s' "$out" | tr '\n' '⏎')"
+check "engine outside a repository refuses" "error: no GitHub origin remote; pass --repo owner/name" \
+  "$(env GH_TOKEN=x HOME="$WORK/home-norepo" PATH="$F:$SYS" \
+    /bin/bash -c "cd '$WORK/plain-dir' && python3 '$ROOT/engine/gh.py' pr-list" 2>&1 | grep '^error:')"
+
 echo "== doctor.md matches the retired exit code =="
 
 check "doctor.md documents no exit 10" "" \

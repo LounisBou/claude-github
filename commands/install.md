@@ -1,5 +1,5 @@
 ---
-description: Install gh if missing, sign in to GitHub in the browser, then check python3, curl, the token and the repository clone
+description: Install gh if missing, sign in to GitHub in the browser, then check python3, curl and the token
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/install.sh:*), Read
 ---
 
@@ -13,8 +13,8 @@ device page in the browser and prints a one-time code (exit code 14). Tell the
 user to enter that code, then run `/github:doctor`. The token stays where `gh`
 keeps it; the script never prints or writes it.
 
-It then verifies that python3, curl and a GitHub token are available, and that
-the working directory is a GitHub repository clone. On failure it prints the
-exact command that fixes the first problem it found.
+It then verifies that python3, curl and a GitHub token are available. It needs
+no repository: it runs from any directory. On failure it prints the exact
+command that fixes the first problem it found.
 
 $ARGUMENTS

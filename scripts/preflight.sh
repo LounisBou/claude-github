@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Refuse to run when a dependency is missing, so no skill degrades silently.
+#
+#   preflight.sh              dependencies, then the GitHub repository clone
+#   preflight.sh --deps-only  dependencies only: /github:install and
+#                             /github:doctor need no repository
 set -u
+
+DEPS_ONLY=0
+[ "${1:-}" = "--deps-only" ] && DEPS_ONLY=1
 
 die() {
   printf 'error: %s\n' "$1" >&2
@@ -18,13 +25,15 @@ PY
 
 command -v curl >/dev/null 2>&1 || die "curl not found on PATH" "install curl" 11
 
-# ── Repository ────────────────────────────────────────────────
-remote=$(git remote get-url origin 2>/dev/null || echo "")
-[ -n "$remote" ] || die "no git remote named origin" "run this from a GitHub repository clone" 13
-case "$remote" in
-  *github.com*) : ;;
-  *) die "origin is not a github.com remote: $remote" "run this from a GitHub repository clone" 13 ;;
-esac
+# ── Repository (skipped by --deps-only) ───────────────────────
+if [ "$DEPS_ONLY" != 1 ]; then
+  remote=$(git remote get-url origin 2>/dev/null || echo "")
+  [ -n "$remote" ] || die "no git remote named origin" "run this from a GitHub repository clone" 13
+  case "$remote" in
+    *github.com*) : ;;
+    *) die "origin is not a github.com remote: $remote" "run this from a GitHub repository clone" 13 ;;
+  esac
+fi
 
 # ── GitHub token ──────────────────────────────────────────────
 # Asked through gh's exit code only: the token itself is never read here. gh is
