@@ -2,7 +2,8 @@
 // carries before it leaves the machine. Only what code can decide without
 // judgement is here: a semicolon in prose, an attribution trailer, a title on
 // more than one line or far past « about sixty characters », a heading in a
-// pull request description. The workflow vocabulary is left out: « session »
+// pull request description, a TODO item that points to another or joins two
+// actions. The workflow vocabulary is left out: « session »
 // and « agent » are also real product words, and a refusal there would be a
 // guess. Pure functions only: register.ts holds the $ that acts on them.
 
@@ -108,6 +109,27 @@ function bareTodoItem(lines: string[]): boolean {
   return false
 }
 
+const TODO_ALONE_RULE = 'a TODO item stands alone, it never points to another item (« the same edit », « same as above », « likewise ») and writes the action in full (WRITING.md, « Pull request descriptions »)'
+const TODO_ONE_RULE = 'one checkbox, one action: an edit and the restart, reload or deploy that applies it are two checkboxes, never joined by « then » or « and run » (WRITING.md, « Pull request descriptions »)'
+const POINTER = /\b(the same (edit|change|step|steps|command)|same as (above|before)|as above|as before|likewise)\b/i
+const JOINED = /\b(then|and run)\b/i
+
+// The checkbox items of the TODO sections, as prose with code spans taken out,
+// so a value such as `then=1` in backticks is never read as a joining word.
+function todoItems(lines: string[]): string[] {
+  const out: string[] = []
+  let inTodo = false
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (TODO_LABEL.test(line)) { inTodo = true; continue }
+    if (BOLD_LABEL.test(line)) { inTodo = false; continue }
+    if (!inTodo || line === '') continue
+    if (!/^[-*+]\s/.test(line)) { inTodo = false; continue }
+    out.push(strip(line.replace(/^[-*+]\s+(\[[ xX]\]\s+)?/, '')))
+  }
+  return out
+}
+
 // Every rule one field breaks, each named once.
 function lintField(kind: 'pr' | 'comment', field: string, text: string): Violation[] {
   const found: Violation[] = []
@@ -124,6 +146,11 @@ function lintField(kind: 'pr' | 'comment', field: string, text: string): Violati
   if (lines.some((l) => TRAILER.test(l))) add(TRAILER_RULE)
   if (kind === 'pr' && field === 'body' && lines.some((l) => HEADING.test(l))) add(HEADING_RULE)
   if (kind === 'pr' && field === 'body' && bareTodoItem(lines)) add(TODO_RULE)
+  if (kind === 'pr' && field === 'body') {
+    const items = todoItems(lines)
+    if (items.some((i) => POINTER.test(i))) add(TODO_ALONE_RULE)
+    if (items.some((i) => JOINED.test(i))) add(TODO_ONE_RULE)
+  }
   return found
 }
 
