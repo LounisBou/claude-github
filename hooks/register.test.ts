@@ -506,6 +506,72 @@ test('an unclosed fence runs to the end, a shorter closing run does not close it
   expect(proseLines('a\n````\nb;\n```\nc;')).toEqual(['a'])
 })
 
+// A security update: the description of a pull request already merged in this
+// form, each CVE id a link, passes as it is. The older one, its CVE id bare,
+// is refused for the link alone.
+const cve1743 = [
+  'symfony/expression-language, symfony/http-foundation and symfony/yaml to 8.1.9 ([CVE-2026-109449](https://symfony.com/cve-2026-109449), [CVE-2026-108082](https://symfony.com/cve-2026-108082), [CVE-2026-109413](https://symfony.com/cve-2026-109413))',
+  '',
+  '| | |',
+  '|---|---|',
+  '| Package | `symfony/expression-language` (locked at v8.1.1, now v8.1.9) |',
+  '| Advisory | PKSA-vq1j-sc3k-jzzk / [CVE-2026-109449](https://symfony.com/cve-2026-109449) — Unbounded Nesting in the Expression Parser Lets Untrusted Expressions Crash the Process |',
+  '| Affected | `>=2.4.0,<5.4.54`, `>=6.0.0,<6.4.48`, `>=7.0.0,<7.4.21` and `>=8.0.0,<8.1.9` |',
+  '| Reference | https://symfony.com/cve-2026-109449 |',
+  '',
+  '| | |',
+  '|---|---|',
+  '| Package | `symfony/http-foundation` (locked at v8.1.4, now v8.1.9) |',
+  '| Advisory | PKSA-xmwy-rmx5-m7h4 / [CVE-2026-108082](https://symfony.com/cve-2026-108082) — ReDoS in HeaderUtils::split() Reachable Through the Cache-Control Request Header |',
+  '| Affected | `>=5.4.1,<5.4.54`, `>=6.0.1,<6.4.46`, `>=7.0.0,<7.4.19` and `>=8.0.0,<8.1.7` |',
+  '| Reference | https://symfony.com/cve-2026-108082 |',
+  '',
+  '| | |',
+  '|---|---|',
+  '| Package | `symfony/yaml` (locked at v8.1.2, now v8.1.9) |',
+  '| Advisory | PKSA-xz3r-9gp4-4m1z / [CVE-2026-109413](https://symfony.com/cve-2026-109413) — Unbounded Recursion in the YAML Inline Lexer Lets a Single Document Crash the Process |',
+  '| Affected | `>=2.0.0,<5.4.54`, `>=6.0.0,<6.4.45`, `>=7.0.0,<7.4.18` and `>=8.0.0,<8.1.6` |',
+  '| Reference | https://symfony.com/cve-2026-109413 |',
+].join('\n')
+const cve1557 = [
+  'squizlabs/php_codesniffer to 4.0.4 (CVE-2026-67434)',
+  '',
+  '| | |',
+  '|---|---|',
+  '| Package | `squizlabs/php_codesniffer` (dev dependency, locked at 4.0.1) |',
+  '| Advisory | PKSA-rdkp-vv9z-mjkg / CVE-2026-67434 — OS command injection, **high** |',
+  '| Affected | `<3.13.6` and `>=4.0.0,<4.0.2` |',
+  '| Reference | https://github.com/PHPCSStandards/PHP_CodeSniffer/security/advisories/GHSA-hmqg-cxww-wqhq |',
+].join('\n')
+
+test('a security update in the house form passes, a bare CVE id is refused', () => {
+  const link = 'body: a CVE id is a markdown link to its advisory, `[CVE-YYYY-NNNNN](<advisory URL>)`, never bare and never in a code span'
+  expect(lint('pr-create', { title: 'chore: update Symfony packages for security', body: cve1743 })).toEqual([])
+  expect(lint('pr-update', { pr: 1, body: cve1743 })).toEqual([])
+  expect(rulesOf('pr-create', { title: 't', body: cve1557 })).toEqual([link])
+  expect(rulesOf('pr-update', { pr: 1, body: 'Bumps the parser.\n\nThe advisory is `CVE-2026-11111`.' })).toEqual([link])
+  // In a URL, in a fenced block, in a title and in a comment, a CVE id is not held.
+  expect(lint('pr-create', { title: 'fix: patch CVE-2026-11111', body: 'See https://example.com/cve-2026-11111 and <https://example.com/CVE-2026-11111>.\n```\nCVE-2026-11111\n```' })).toEqual([])
+  expect(lint('pr-comment', { pr: 1, body: 'Fixes CVE-2026-11111.' })).toEqual([])
+})
+
+test('a security update whose first line names a CVE id without its table is refused', () => {
+  const tables = 'body: a description whose first line names CVE ids has one table per advisory, with the Package, Advisory, Affected and Reference rows, its Advisory row naming the CVE id'
+  const first = 'symfony/yaml and symfony/process to 8.1.9 ([CVE-2026-11111](https://example.com/a), [CVE-2026-22222](https://example.com/b))'
+  const table = (id: string, rows = ['Package', 'Advisory', 'Affected', 'Reference']) => ['| | |', '|---|---|', ...rows.map((row) =>
+    '| ' + row + ' | ' + (row === 'Advisory' ? 'PKSA-aaaa / [' + id + '](https://example.com/a) — A title' : '`x`') + ' |')].join('\n')
+  expect(lint('pr-create', { title: 't', body: [first, table('CVE-2026-11111'), table('CVE-2026-22222')].join('\n\n') })).toEqual([])
+  expect(rulesOf('pr-create', { title: 't', body: [first, table('CVE-2026-11111')].join('\n\n') })).toEqual([tables])
+  expect(rulesOf('pr-create', { title: 't', body: first })).toEqual([tables])
+  expect(rulesOf('pr-update', { pr: 1, body: [first, table('CVE-2026-11111'), table('CVE-2026-22222', ['Package', 'Advisory', 'Affected'])].join('\n\n') })).toEqual([tables])
+  // A link with a title after its URL, or a reference link, is a link.
+  expect(lint('pr-create', { title: 't', body: 'Reads the header once.\n\nSee [CVE-2026-11111](https://example.com/a "advisory") and [CVE-2026-22222][1].\n\n[1]: https://example.com/b' })).toEqual([])
+  // An Advisory row whose only mention of an id is inside a URL does not name it.
+  expect(rulesOf('pr-create', { title: 't', body: [first, table('CVE-2026-11111'), table('CVE-2026-33333').replace('](https://example.com/a)', '](https://example.com/CVE-2026-22222)')].join('\n\n') })).toEqual([tables])
+  // A CVE id linked further down, in a description that is no security update, asks for no table.
+  expect(lint('pr-create', { title: 't', body: 'Reads the header once.\n\nThe check came with [CVE-2026-11111](https://example.com/a).' })).toEqual([])
+})
+
 // ---- the tool.call hook applying them ----
 
 test('a text breaking a rule is refused with the rule, and gh.py does not run', async ($, on) => {

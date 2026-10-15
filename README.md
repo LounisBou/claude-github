@@ -48,7 +48,9 @@ it. `/github:doctor` then confirms everything is ready.
   leaves the machine, the mod checks the mechanical rules of
   `engine/WRITING.md`: no semicolon in prose (code spans, fenced blocks and
   URLs are not prose), no `Co-Authored-By` or `Claude-Session` trailer, a
-  title on one line and within 72 characters, no heading in a PR description.
+  title on one line and within 72 characters, no heading in a PR description,
+  every CVE id in a PR description a link to its advisory, and a security
+  update's tables, one per advisory.
   A text that breaks one is refused with the rule, so it can be rewritten. A
   text the user typed in the prompt passes, and the same text sent again is
   put to the user. `pr-create` opens a draft unless the call says otherwise,
