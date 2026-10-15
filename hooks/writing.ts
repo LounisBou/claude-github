@@ -3,7 +3,8 @@
 // judgement is here: a semicolon in prose, an attribution trailer, a title on
 // more than one line or far past « about sixty characters », a heading in a
 // pull request description, a TODO item that points to another or joins two
-// actions. The workflow vocabulary is left out: « session »
+// actions, a CVE id that is no link, a security update without its tables.
+// The workflow vocabulary is left out: « session »
 // and « agent » are also real product words, and a refusal there would be a
 // guess. Pure functions only: register.ts holds the $ that acts on them.
 
@@ -130,6 +131,54 @@ function todoItems(lines: string[]): string[] {
   return out
 }
 
+const CVE_LINK_RULE = 'a CVE id is a markdown link to its advisory, `[CVE-YYYY-NNNNN](<advisory URL>)`, never bare and never in a code span (WRITING.md, « Security update pull requests »)'
+const CVE_TABLE_RULE = 'a description whose first line names CVE ids has one table per advisory, with the Package, Advisory, Affected and Reference rows, its Advisory row naming the CVE id (WRITING.md, « Security update pull requests »)'
+const CVE = /\bCVE-\d{4}-\d{4,}\b/gi
+const CVE_LINK = /\[CVE-\d{4}-\d{4,}\]\([^)\s]+\)/gi
+const TABLE_ROW = /^\s*\|\s*([^|]*?)\s*\|/
+
+// A line with its URLs taken out: a URL that holds a CVE id, as an
+// advisory's often does, names no id. A link keeps its text.
+function withoutUrls(line: string): string {
+  return line
+    .replace(/\]\([^)\s]+\)/g, ']')
+    .replace(/<[a-z][a-z0-9+.-]*:[^>\s]*>/gi, ' ')
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ')
+}
+
+// A CVE id GitHub may leave as plain text: one in prose or in a code span,
+// outside a link of its own.
+function bareCve(lines: string[]): boolean {
+  return lines.some((l) => new RegExp(CVE.source, 'i').test(withoutUrls(l.replace(CVE_LINK, ' '))))
+}
+
+function cveIds(text: string): string[] {
+  return (text.match(CVE) ?? []).map((id) => id.toUpperCase())
+}
+
+// A security update, its first line naming CVE ids, without its tables: an id
+// of that line no Advisory row names, or an advisory's table missing a row.
+function missingCveTables(lines: string[]): boolean {
+  const first = lines.find((l) => l.trim() !== '')
+  const ids = first ? cveIds(withoutUrls(first)) : []
+  if (ids.length === 0) return false
+  const tables: string[][] = []
+  let table: string[] | null = null
+  for (const line of lines) {
+    if (!/^\s*\|/.test(line)) { table = null; continue }
+    if (!table) {
+      table = []
+      tables.push(table)
+    }
+    table.push(line)
+  }
+  const label = (row: string) => TABLE_ROW.exec(row)?.[1] ?? ''
+  const advisories = tables.filter((rows) => rows.some((row) => label(row) === 'Advisory'))
+  if (advisories.some((rows) => !['Package', 'Affected', 'Reference'].every((name) => rows.some((row) => label(row) === name)))) return true
+  const named = new Set(advisories.flatMap((rows) => rows.filter((row) => label(row) === 'Advisory').flatMap(cveIds)))
+  return ids.some((id) => !named.has(id))
+}
+
 // Every rule one field breaks, each named once.
 function lintField(kind: 'pr' | 'comment', field: string, text: string): Violation[] {
   const found: Violation[] = []
@@ -150,6 +199,8 @@ function lintField(kind: 'pr' | 'comment', field: string, text: string): Violati
     const items = todoItems(lines)
     if (items.some((i) => POINTER.test(i))) add(TODO_ALONE_RULE)
     if (items.some((i) => JOINED.test(i))) add(TODO_ONE_RULE)
+    if (bareCve(lines)) add(CVE_LINK_RULE)
+    if (missingCveTables(lines)) add(CVE_TABLE_RULE)
   }
   return found
 }
