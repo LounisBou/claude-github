@@ -91,8 +91,10 @@ An existing description is never edited without the operator's approval.
 ## Security update pull requests
 
 A pull request that updates dependencies to fix published advisories opens its
-description with this, in place of the summary text, then the four sections of the
-template above when needed, with their rules:
+description with the first line and the tables below. They take the place of the
+summary text, and the four sections of the template above follow when needed, with
+their rules. A description whose first line names a CVE id is read as a security
+update and needs its tables:
 
 ```
 <package>, <package> and <package> to <version> ([<CVE id>](<advisory URL>), [<CVE id>](<advisory URL>))

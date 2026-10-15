@@ -564,6 +564,10 @@ test('a security update whose first line names a CVE id without its table is ref
   expect(rulesOf('pr-create', { title: 't', body: [first, table('CVE-2026-11111')].join('\n\n') })).toEqual([tables])
   expect(rulesOf('pr-create', { title: 't', body: first })).toEqual([tables])
   expect(rulesOf('pr-update', { pr: 1, body: [first, table('CVE-2026-11111'), table('CVE-2026-22222', ['Package', 'Advisory', 'Affected'])].join('\n\n') })).toEqual([tables])
+  // A link with a title after its URL, or a reference link, is a link.
+  expect(lint('pr-create', { title: 't', body: 'Reads the header once.\n\nSee [CVE-2026-11111](https://example.com/a "advisory") and [CVE-2026-22222][1].\n\n[1]: https://example.com/b' })).toEqual([])
+  // An Advisory row whose only mention of an id is inside a URL does not name it.
+  expect(rulesOf('pr-create', { title: 't', body: [first, table('CVE-2026-11111'), table('CVE-2026-33333').replace('](https://example.com/a)', '](https://example.com/CVE-2026-22222)')].join('\n\n') })).toEqual([tables])
   // A CVE id linked further down, in a description that is no security update, asks for no table.
   expect(lint('pr-create', { title: 't', body: 'Reads the header once.\n\nThe check came with [CVE-2026-11111](https://example.com/a).' })).toEqual([])
 })

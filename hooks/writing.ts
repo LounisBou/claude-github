@@ -4,9 +4,9 @@
 // more than one line or far past « about sixty characters », a heading in a
 // pull request description, a TODO item that points to another or joins two
 // actions, a CVE id that is no link, a security update without its tables.
-// The workflow vocabulary is left out: « session »
-// and « agent » are also real product words, and a refusal there would be a
-// guess. Pure functions only: register.ts holds the $ that acts on them.
+// The workflow vocabulary is left out: « session » and « agent » are also real
+// product words, and a refusal there would be a guess. Pure functions only:
+// register.ts holds the $ that acts on them.
 
 export type Violation = {
   // Where the text sits in the call: "title", "body" or "comments[2].body".
@@ -134,7 +134,9 @@ function todoItems(lines: string[]): string[] {
 const CVE_LINK_RULE = 'a CVE id is a markdown link to its advisory, `[CVE-YYYY-NNNNN](<advisory URL>)`, never bare and never in a code span (WRITING.md, « Security update pull requests »)'
 const CVE_TABLE_RULE = 'a description whose first line names CVE ids has one table per advisory, with the Package, Advisory, Affected and Reference rows, its Advisory row naming the CVE id (WRITING.md, « Security update pull requests »)'
 const CVE = /\bCVE-\d{4}-\d{4,}\b/gi
-const CVE_LINK = /\[CVE-\d{4}-\d{4,}\]\([^)\s]+\)/gi
+const CVE_ID = /\bCVE-\d{4}-\d{4,}\b/i
+// An inline link, a title after its URL included, or a reference link.
+const CVE_LINK = /\[CVE-\d{4}-\d{4,}\](\([^)]*\)|\[[^\]]*\])/gi
 const TABLE_ROW = /^\s*\|\s*([^|]*?)\s*\|/
 
 // A line with its URLs taken out: a URL that holds a CVE id, as an
@@ -149,7 +151,7 @@ function withoutUrls(line: string): string {
 // A CVE id GitHub may leave as plain text: one in prose or in a code span,
 // outside a link of its own.
 function bareCve(lines: string[]): boolean {
-  return lines.some((l) => new RegExp(CVE.source, 'i').test(withoutUrls(l.replace(CVE_LINK, ' '))))
+  return lines.some((l) => CVE_ID.test(withoutUrls(l.replace(CVE_LINK, ' '))))
 }
 
 function cveIds(text: string): string[] {
@@ -175,7 +177,7 @@ function missingCveTables(lines: string[]): boolean {
   const label = (row: string) => TABLE_ROW.exec(row)?.[1] ?? ''
   const advisories = tables.filter((rows) => rows.some((row) => label(row) === 'Advisory'))
   if (advisories.some((rows) => !['Package', 'Affected', 'Reference'].every((name) => rows.some((row) => label(row) === name)))) return true
-  const named = new Set(advisories.flatMap((rows) => rows.filter((row) => label(row) === 'Advisory').flatMap(cveIds)))
+  const named = new Set(advisories.flatMap((rows) => rows.filter((row) => label(row) === 'Advisory').map(withoutUrls).flatMap(cveIds)))
   return ids.some((id) => !named.has(id))
 }
 
