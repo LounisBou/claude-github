@@ -1306,6 +1306,27 @@ check "no token: gh auth login --web run" "gh auth login --web --git-protocol ht
   "$(grep '^gh auth login' "$F/calls.log")"
 check "no token: exits 14" "14" "$code"
 
+# gh prints its code and exits between the loop's read of the log and its
+# liveness check. The fake gh waits until the fake sed has taken its read, then
+# prints and exits. The fake sed holds the output for 0.5 s, so the check comes
+# after gh has exited.
+F="$WORK/fk-race"
+new_fakes "$F"
+fake_uname "$F" Darwin arm64
+fake_gh "$F/gh" "$F"
+sed -i.bak 's|^  "auth login") echo|  "auth login") i=0; while [ ! -f "'"$F"'/read" ] \&\& [ \$i -lt 100 ]; do sleep 0.05; i=\$((i+1)); done; echo|' "$F/gh" && rm -f "$F/gh.bak"
+cat > "$F/sed" <<SED
+#!/bin/sh
+out=\$("$SYS/sed" "\$@")
+touch "$F/read"
+sleep 0.5
+printf '%s\n' "\$out"
+SED
+chmod +x "$F/sed"
+out=$(run_install "$F" "$WORK/home-race"); code=$?
+check "gh exits right after printing its code: exits 14" "14" "$code"
+check "gh exits right after printing its code: the code is shown" "1" "$(printf '%s' "$out" | grep -c 'ABCD-1234')"
+
 # Token present: nothing installed, no sign-in, no browser, and the token
 # never shows.
 touch "$F/authed"
