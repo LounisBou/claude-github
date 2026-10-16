@@ -149,7 +149,7 @@ install_gh() {
 # until it ends, so it runs detached: this script reads the code from gh's
 # output, opens the page, prints the code and leaves gh waiting for the user.
 sign_in() {
-  local gh log code i
+  local gh log code i alive
   gh=$(find_gh)
   if [ -t 0 ] && [ -t 1 ]; then
     "$gh" auth login --web --git-protocol https --hostname github.com \
@@ -161,9 +161,11 @@ sign_in() {
     </dev/null >"$log" 2>&1 &
   code=""
   for i in $(seq 1 40); do
+    alive=0
+    kill -0 $! 2>/dev/null && alive=1
     code=$(sed -n 's/.*one-time code: *\([A-Z0-9-]*\).*/\1/p' "$log" | head -1)
     [ -n "$code" ] && break
-    kill -0 $! 2>/dev/null || break
+    [ "$alive" = 1 ] || break
     sleep 0.5
   done
   rm -f "$log"

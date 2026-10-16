@@ -1066,9 +1066,9 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.7.0" \
+check "manifest version" "0.7.1" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.7.0 0.7.0" \
+check "marketplace version matches" "0.7.1 0.7.1" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
@@ -1305,6 +1305,27 @@ check "no token: brew not run" "" "$(grep '^brew' "$F/calls.log")"
 check "no token: gh auth login --web run" "gh auth login --web --git-protocol https --hostname github.com" \
   "$(grep '^gh auth login' "$F/calls.log")"
 check "no token: exits 14" "14" "$code"
+
+# gh prints its code and exits between the loop's read of the log and its
+# liveness check. The fake gh waits until the fake sed has taken its read, then
+# prints and exits. The fake sed holds the output for 0.5 s, so the check comes
+# after gh has exited.
+F="$WORK/fk-race"
+new_fakes "$F"
+fake_uname "$F" Darwin arm64
+fake_gh "$F/gh" "$F"
+sed -i.bak 's|^  "auth login") echo|  "auth login") i=0; while [ ! -f "'"$F"'/read" ] \&\& [ \$i -lt 100 ]; do sleep 0.05; i=\$((i+1)); done; echo|' "$F/gh" && rm -f "$F/gh.bak"
+cat > "$F/sed" <<SED
+#!/bin/sh
+out=\$("$SYS/sed" "\$@")
+touch "$F/read"
+sleep 0.5
+printf '%s\n' "\$out"
+SED
+chmod +x "$F/sed"
+out=$(run_install "$F" "$WORK/home-race"); code=$?
+check "gh exits right after printing its code: exits 14" "14" "$code"
+check "gh exits right after printing its code: the code is shown" "1" "$(printf '%s' "$out" | grep -c 'ABCD-1234')"
 
 # Token present: nothing installed, no sign-in, no browser, and the token
 # never shows.
