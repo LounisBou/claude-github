@@ -216,6 +216,9 @@ let refreshing = false
 // The timer reading the PRs while the pane is open.
 let watch: { cancel: () => void } | undefined
 
+// The width of the label column: CI:SUCCESS, CI:FAILURE and CI:PENDING.
+const LABEL_COLUMN = 10
+
 function ciColor(ci: string): string {
   if (ci === 'SUCCESS') return 'success'
   if (ci === 'FAILURE') return 'error'
@@ -455,24 +458,36 @@ export function register(on: any): void {
     const state = await read($, pane)
     const rows = state.rows.length === 0
       ? [Text({ key: 'empty', children: [state.refreshing ? 'Loading…' : 'No open PRs'] })]
-      : state.rows.map((r) =>
-          Box({
+      : state.rows.map((r) => {
+          const suffix = (r.draft ? ' ○ draft' : '') + (r.comments ? ' 💬' + r.comments : '')
+          return Box({
             key: 'pr-' + r.number,
             flexDirection: 'row',
             columnGap: 1,
             children: [
               Link({ key: 'link-' + r.number, href: r.url, label: '#' + r.number }),
-              Text(
-                { color: ciColor(r.ci), children: [
-                  clip(r.title, width - 28)
-                  + (r.draft ? ' ○ draft' : '')
-                  + ' CI:' + r.ci
-                  + (r.comments ? ' 💬' + r.comments : ''),
-                ] },
-              ),
+              // The title takes the room the number and the label leave, so the
+              // label always shows; only the label is coloured.
+              Box({
+                key: 'room-' + r.number,
+                flexGrow: 1,
+                flexShrink: 1,
+                children: [
+                  Text({
+                    wrap: 'truncate-end',
+                    children: [clip(r.title, width - LABEL_COLUMN - 10 - suffix.length) + suffix],
+                  }),
+                ],
+              }),
+              Box({
+                key: 'label-' + r.number,
+                width: LABEL_COLUMN,
+                flexShrink: 0,
+                children: [Text({ color: ciColor(r.ci), children: ['CI:' + r.ci] })],
+              }),
             ],
-          }),
-        )
+          })
+        })
     return Box({
       key: 'prs',
       flexDirection: 'column',
