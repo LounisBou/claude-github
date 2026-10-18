@@ -223,6 +223,9 @@ test('/prs reads each listed PR in detail and opens the pane', async ($, on) => 
   expect(runs.filter((r) => r.command === 'pr-status').map((r) => String(r.args.pr)).sort()).toEqual(['11', '12'])
 })
 
+// The colour of the Text a row's Box holds.
+const colourOf = (box: any) => box.children[0].props.color
+
 const PANE_EVENT = {
   plugin: 'github',
   component: 'Pane',
@@ -250,9 +253,72 @@ test('the pane renders one row per PR with CI, comments and a refresh button', a
 
   const ui = await $.ui.mount({ ...PANE_EVENT })
   expect(await ui.find({ type: 'Link', props: { href: 'https://github.com/acme/thing/pull/12' } })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /fix: related PRs .*CI:FAILURE 💬3/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /minimize nodes ○ draft CI:FAILURE$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'room-12', text: /fix: related PRs 💬3$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'label-12', text: 'CI:FAILURE' })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'room-11', text: /minimize nodes ○ draft$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'label-11', text: 'CI:FAILURE' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'refresh' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the pane leaves the title uncoloured and colours only the CI label by state', async ($, on) => {
+  const states: Record<string, string> = { '12': 'FAILURE', '11': 'PENDING' }
+  await stubMod(on, [], [], byCommand({
+    'pr-list': () => ok(PR_LIST),
+    'pr-checks': (e) => ok(JSON.stringify({ result: states[prOf(e)], failed_checks: [] })),
+    'pr-status': () => ok(JSON.stringify({ comments: 0, review_comments: 0 })),
+  }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.command.run({ command: 'prs', args: '' })
+
+  const ui = await $.ui.mount({ ...PANE_EVENT })
+  expect(colourOf(await ui.find({ type: 'Box', key: 'room-12' }))).toBeUndefined()
+  expect(colourOf(await ui.find({ type: 'Box', key: 'room-11' }))).toBeUndefined()
+  expect(colourOf(await ui.find({ type: 'Box', key: 'label-12' }))).toBe('error')
+  expect(colourOf(await ui.find({ type: 'Box', key: 'label-11' }))).toBe('warning')
+  await ui.unmount()
+})
+
+test('the pane colours a SUCCESS label green and an unknown one inactive', async ($, on) => {
+  const many = [100, 99, 94, 93, 92, 91, 90].map((n) => ({
+    number: n, title: 'PR ' + n, html_url: 'https://github.com/acme/thing/pull/' + n, draft: false,
+  }))
+  await stubMod(on, [], [], byCommand({
+    'pr-list': () => ok(JSON.stringify(many)),
+    'pr-checks': (e) => prOf(e) === '100'
+      ? { exitCode: 3, stdout: '', stderr: 'error: boom' }
+      : ok(JSON.stringify({ result: 'SUCCESS', failed_checks: [] })),
+    'pr-status': () => ok(JSON.stringify({ comments: 0, review_comments: 0 })),
+  }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.command.run({ command: 'prs', args: '' })
+
+  const ui = await $.ui.mount({ ...PANE_EVENT })
+  expect(colourOf(await ui.find({ type: 'Box', key: 'label-99' }))).toBe('success')
+  expect(colourOf(await ui.find({ type: 'Box', key: 'label-100' }))).toBe('inactive')
+  await ui.unmount()
+})
+
+test('the pane clips a long title so the CI label shows at a narrow width', async ($, on) => {
+  const long = 'a very long pull request title that would push the label out of a narrow pane'
+  await stubMod(on, [], [], byCommand({
+    'pr-list': () => ok(JSON.stringify([
+      { number: 12, title: long, html_url: 'https://github.com/acme/thing/pull/12', draft: true },
+    ])),
+    'pr-checks': () => ok(JSON.stringify({ result: 'FAILURE', failed_checks: [] })),
+    'pr-status': () => ok(JSON.stringify({ comments: 3, review_comments: 0 })),
+  }))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.command.run({ command: 'prs', args: '' })
+
+  const ui = await $.ui.mount({ ...PANE_EVENT, props: { ...PANE_EVENT.props, bodyColumns: 40 } })
+  const title = await ui.find({ type: 'Box', key: 'room-12' })
+  const text = String(title.text)
+  expect(text.endsWith('…') || text.includes('… ○ draft')).toBe(true)
+  expect(text).toContain('○ draft')
+  expect(text).toContain('💬3')
+  expect(text.length).toBeLessThanOrEqual(40 - 'CI:FAILURE'.length - 6)
+  expect(await ui.find({ type: 'Box', key: 'label-12', text: 'CI:FAILURE' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -272,9 +338,12 @@ test('the pane lists every PR, details the newest five and marks unreadable chec
   await $.command.run({ command: 'prs', args: '' })
 
   const ui = await $.ui.mount({ ...PANE_EVENT })
-  expect(await ui.find({ type: 'Text', text: /PR 100 CI:\?/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /PR 99 CI:SUCCESS/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /PR 94 CI:–/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'room-100', text: /PR 100/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'label-100', text: 'CI:?' })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'room-99', text: /PR 99/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'label-99', text: 'CI:SUCCESS' })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'room-94', text: /PR 94/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'label-94', text: 'CI:–' })).toBeDefined()
   expect(runs.filter((r) => r.command === 'pr-checks').length).toBe(5)
   await ui.unmount()
 })
@@ -896,7 +965,8 @@ test('the open pane reads its PRs again on the watch and toasts a CI that ended'
   expect(toasts).toEqual(['#12 CI: FAILURE (lint)', '#11 CI: FAILURE (lint)'])
 
   const ui = await $.ui.mount({ ...PANE_EVENT })
-  expect(await ui.find({ type: 'Text', text: /fix: related PRs .*CI:FAILURE/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'room-12', text: /fix: related PRs/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', key: 'label-12', text: 'CI:FAILURE' })).toBeDefined()
   await ui.unmount()
 })
 
