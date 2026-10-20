@@ -781,6 +781,180 @@ test('a reserved approval refused by the person runs nothing', async ($, on) => 
   expect(runs.length).toBe(0)
 })
 
+// ---- repositories in auto-merge ----
+
+// env: the variables $.env.get answers. files: the files $.fs reads, by path,
+// a null text being a file that exists but cannot be read. logs: $.ui.log lines.
+function stubAutoMerge(on: any, env: Record<string, string>, files: Record<string, string | null>, logs: string[] = []) {
+  on('env.get', (_$: any, e: any) => ({ value: env[e.name] }))
+  on('fs.exists', (_$: any, e: any) => ({ value: e.path in files }))
+  on('fs.read', (_$: any, e: any) => {
+    const text = files[e.path]
+    return typeof text === 'string' ? { value: text } : { deny: 'EACCES ' + e.path }
+  })
+  on('ui.log', (_$: any, e: any) => {
+    logs.push(e.text)
+    return { value: undefined }
+  })
+}
+
+const DATA = { CLAUDE_PLUGIN_DATA: '/data/github' }
+const LISTED = { '/data/github/auto-merge.json': '{"repositories": ["Acme/Thing"]}' }
+
+test('a pr-ready on a repository in auto-merge is not asked', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked.length).toBe(0)
+  expect(runs.length).toBe(1)
+})
+
+test('a pr-ready on a repository not in auto-merge is asked', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/other' })
+  expect(asked.length).toBe(1)
+  expect(asked[0]).toContain('out of draft')
+  expect(JSON.stringify(out)).toContain('refused gh pr-ready')
+  expect(runs.length).toBe(0)
+})
+
+test('with no auto-merge file a pr-ready is asked, and nothing is logged', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  const logs: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, {}, logs)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
+  expect(asked.length).toBe(1)
+  expect(runs.length).toBe(0)
+  expect(logs).toEqual([])
+})
+
+for (const [what, text] of [['unreadable', null], ['without a list', '{"repositories": "acme/thing"}'], ['not JSON', 'not json']] as const) {
+  test('an auto-merge file ' + what + ' asks, with one log line naming it', async ($, on) => {
+    const runs: any[] = []
+    const asked: string[] = []
+    const logs: string[] = []
+    await stubMod(on, runs, [], undefined, { decision: 'allow' })
+    stubAsk(on, asked, 'Deny')
+    stubAutoMerge(on, DATA, { '/data/github/auto-merge.json': text }, logs)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+    await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
+    expect(asked.length).toBe(1)
+    expect(runs.length).toBe(0)
+    expect(logs.length).toBe(1)
+    expect(logs[0]).toContain('/data/github/auto-merge.json')
+  })
+}
+
+test('a description replaced and a pull request opened out of draft on a repository in auto-merge are still asked', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-update', args: { pr: 1, body: 'New text' }, repo: 'acme/thing' })
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-create', args: { title: 'fix: x', draft: false }, repo: 'acme/thing' })
+  expect(asked.length).toBe(2)
+  expect(asked[0]).toContain('Replace the description')
+  expect(asked[1]).toContain('not as a draft')
+  expect(runs.length).toBe(0)
+})
+
+test('a pr-ready on a repository in auto-merge still follows the permission rules', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'deny', reason: 'denied by rule', rule: 'mcp__github__gh' })
+  stubAsk(on, asked, 'Allow')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
+  expect(JSON.stringify(out)).toContain('denied by rule')
+  expect(runs.length).toBe(0)
+})
+
+test('without a repo in the call, the checkout\'s origin names the repository', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  const reply = (e: any) => e.argv[0] === 'git'
+    ? { exitCode: 0, stdout: 'git@github.com:acme/thing.git\n', stderr: '' }
+    : { exitCode: 0, stdout: 'ok', stderr: '' }
+  await stubMod(on, runs, [], reply, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked.length).toBe(0)
+  expect(runs.map((r) => r.argv[0])).toEqual(['git', 'python3'])
+})
+
+test('GH_REPO names the repository before the origin, as it does for the engine', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  const reply = (e: any) => e.argv[0] === 'git'
+    ? { exitCode: 0, stdout: 'https://github.com/acme/thing.git\n', stderr: '' }
+    : { exitCode: 0, stdout: 'ok', stderr: '' }
+  await stubMod(on, runs, [], reply, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, { ...DATA, GH_REPO: 'acme/other' }, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
+  expect(asked.length).toBe(1)
+  expect(runs.length).toBe(0)
+})
+
+test('a repo in the call names the repository before one in its args', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1, repo: 'acme/thing' }, repo: 'acme/other' })
+  expect(asked.length).toBe(1)
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1, repo: 'acme/thing' } })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked.length).toBe(1)
+})
+
+test('without CLAUDE_PLUGIN_DATA the list is read from the plugin\'s data directory under HOME', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, { HOME: '/home/x' }, {
+    '/home/x/.claude/plugins/data/github-lounisbou/auto-merge.json': '{"repositories": ["acme/thing"]}',
+  })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked.length).toBe(0)
+})
+
 // ---- « Allow for this session » ----
 
 test('« Allow for this session » runs the call and every later one of that command on that repository', async ($, on) => {

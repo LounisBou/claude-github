@@ -55,7 +55,8 @@ it. `/github:doctor` then confirms everything is ready.
   text the user typed in the prompt passes, and the same text sent again is
   put to the user. `pr-create` opens a draft unless the call says otherwise,
   and leaving draft (`draft: false`, `pr-ready`) or replacing an existing
-  description is always asked, whatever the rules allow.
+  description is always asked, whatever the rules allow. The one exception
+  is `pr-ready` on a repository in auto-merge (below).
 - **`/checks [pr]`** — combined CI status of a PR, with the failed checks
   named, defaulting to the current branch's.
 - **`/threads [pr]`** — the open review threads of a PR, as a markdown table.
@@ -79,6 +80,23 @@ Images are attached by committing them to a dedicated `pr-assets` branch
 through the Contents API, named after the SHA-256 of their bytes so the same
 screenshot uploads once. GitHub's own web upload endpoint would need
 whole-account browser cookies; that route is deliberately not used.
+
+## Repositories in auto-merge
+
+`pr-ready` is not asked on a repository listed in `auto-merge.json`, in the
+plugin's data directory: `$CLAUDE_PLUGIN_DATA` when the host sets it, else
+`~/.claude/plugins/data/github-lounisbou/`.
+
+```json
+{ "repositories": ["owner/name"] }
+```
+
+Names compare without regard to case. The repository is the call's `repo`,
+else `GH_REPO`, else the checkout's `origin`, the order the engine itself
+follows. The permission rules still apply, and replacing a description or
+opening a pull request out of draft is asked everywhere. An absent file lists
+no repository; an unreadable or malformed one lists none either and says so in
+one transcript line. The plugin never writes the file.
 
 ## Tests
 
