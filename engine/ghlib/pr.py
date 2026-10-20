@@ -23,6 +23,15 @@ def auth_check(args):
 
 def pr_get(args):
     owner, name = repo.owner_repo()
+    if args.pr is not None:
+        if args.branch:
+            raise errors.UsageError("pass either --pr or --branch, not both")
+        try:
+            pull = http.rest("GET", "/repos/%s/%s/pulls/%s" % (owner, name, args.pr))
+        except errors.NotFound:
+            raise errors.NotFound("no pull request #%s in %s/%s" % (args.pr, owner, name))
+        # The same shape as for a branch, so every formatter reads both alike.
+        return [pull]
     branch = args.branch or _current_branch()
     if not branch:
         raise errors.UsageError("cannot determine the branch; pass --branch")
@@ -206,8 +215,9 @@ def register(subparsers):
     parser = subparsers.add_parser("auth-check", help="verify the token works")
     parser.set_defaults(handler=auth_check)
 
-    parser = subparsers.add_parser("pr-get", help="get the PR for a branch")
+    parser = subparsers.add_parser("pr-get", help="get the PR for a branch, or by its number")
     parser.add_argument("--branch", default=None, help="defaults to the current branch")
+    parser.add_argument("--pr", type=int, default=None, help="the PR's number, in place of a branch")
     parser.set_defaults(handler=pr_get)
 
     parser = subparsers.add_parser("pr-list", help="list open PRs")

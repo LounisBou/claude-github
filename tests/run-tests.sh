@@ -345,6 +345,17 @@ check "unresolvable branch has no traceback" "0" "$(printf '%s' "$out" | grep -c
 printf '%s' '{"number":7,"state":"closed","merged":true}' > "$F2/GET_repos_acme_thing_pulls_7.json"
 check "pr-status reports merged" "merged" "$(gh pr-status 7 --format pr-merge-status)"
 
+# pr-get by number answers in the shape it answers for a branch: a list of one.
+check "pr-get by number returns that PR" "7" "$(gh pr-get --pr 7 --format pr-number)"
+check "pr-get by number is a list, as for a branch" "list 7" \
+  "$(gh pr-get --pr 7 --format raw | python3 -c 'import json,sys; d=json.load(sys.stdin); print(type(d).__name__, d[0]["number"])')"
+printf '%s' '{"__status":404,"message":"Not Found"}' > "$F2/GET_repos_acme_thing_pulls_404.json"
+check_status "pr-get with an unknown number exits 4" 4 gh pr-get --pr 404
+check "pr-get with an unknown number names it" "error: no pull request #404 in acme/thing" \
+  "$(gh pr-get --pr 404 2>&1 >/dev/null)"
+check_status "pr-get with both a number and a branch exits 1" 1 gh pr-get --pr 7 --branch feature-x
+check "pr-get still resolves a branch beside a number fixture" "7" "$(gh pr-get --branch feature-x --format pr-number)"
+
 printf '%s' '[{"id":11,"body":"hello","user":{"login":"bob"}}]' > "$F2/GET_repos_acme_thing_issues_7_comments__per_page=100.json"
 check "pr-issue-comments returns the comments" "11" \
   "$(gh pr-issue-comments 7 --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')"
@@ -1596,6 +1607,9 @@ check "stdin json maps the mod's positional names onto argparse dests" \
 check "stdin json repeats append flags" \
   "image-upload --title=B --title=A -- a.png b.png" \
   "$(argv6 '{"command":"image-upload","args":{"file":["a.png","b.png"],"title":["B","A"]}}')"
+check "stdin json passes pr-get's pr as its flag" \
+  "pr-get --pr=12" \
+  "$(argv6 '{"command":"pr-get","args":{"pr":12}}')"
 check "stdin json sets store_true flags" \
   "pr-create --title=T --draft" \
   "$(argv6 '{"command":"pr-create","args":{"title":"T","draft":true}}')"
