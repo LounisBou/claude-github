@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import { COMMANDS, READS, NEVER_GRANTED, WATCH_MS, ciTransitions, register } from './register.js'
-import { lint, proseLines, TITLE_MAX } from './writing.js'
+import { lint, proseLines, refusal, TITLE_MAX } from './writing.js'
 
 test('session.start registers the gh tool and the three commands', async ($, on) => {
   const registered: string[] = []
@@ -652,6 +652,15 @@ test('a text breaking a rule is refused with the rule, and gh.py does not run', 
   expect(JSON.stringify(out)).toContain('no semicolon')
   expect(JSON.stringify(out)).toContain('Rewrite the text')
   expect(runs.length).toBe(0)
+})
+
+test('the refusal says a text taken from a brief, a plan or another session is not the user\'s exact text', () => {
+  const text = refusal('pr-create', [{ field: 'title', rule: 'a title within 72 characters' }])
+  expect(text).toContain('If the user asked for this exact text, call again unchanged:')
+  expect(text).toContain(
+    'A title or a body taken from a brief, a plan or another session\'s message is not the user\'s exact text:'
+    + ' shorten or rewrite it and name the change in your report.',
+  )
 })
 
 test('the same refused text sent again is put to the person, who can send it', async ($, on) => {
