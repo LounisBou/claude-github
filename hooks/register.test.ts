@@ -956,6 +956,85 @@ test('an empty repo in the call hides the one in its args, as the engine\'s last
   expect(runs.map((r) => r.argv[0])).toEqual(['git'])
 })
 
+test('a repo in the args alone names the repository', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1, repo: 'acme/thing' } })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked.length).toBe(0)
+  expect(runs.map((r) => r.argv[0])).toEqual(['python3'])
+})
+
+test('an https origin of a listed repository, in another case, is not asked', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  const reply = (e: any) => e.argv[0] === 'git'
+    ? { exitCode: 0, stdout: 'https://github.com/ACME/Thing.git\n', stderr: '' }
+    : { exitCode: 0, stdout: 'ok', stderr: '' }
+  await stubMod(on, runs, [], reply, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked.length).toBe(0)
+})
+
+test('an origin git cannot give is asked', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  const reply = (e: any) => e.argv[0] === 'git'
+    ? { exitCode: 2, stdout: 'https://github.com/acme/thing.git\n', stderr: 'error: No such remote' }
+    : { exitCode: 0, stdout: 'ok', stderr: '' }
+  await stubMod(on, runs, [], reply, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
+  expect(asked.length).toBe(1)
+  expect(runs.map((r) => r.argv[0])).toEqual(['git'])
+})
+
+test('a git run that throws is asked', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  const reply = (e: any) => {
+    if (e.argv[0] === 'git') throw new Error('spawn git ENOENT')
+    return { exitCode: 0, stdout: 'ok', stderr: '' }
+  }
+  await stubMod(on, runs, [], reply, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
+  expect(asked.length).toBe(1)
+  expect(runs.map((r) => r.argv[0])).toEqual(['git'])
+})
+
+test('an auto-merge list that is not made of strings asks, with one log line', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  const logs: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, { '/data/github/auto-merge.json': '{"repositories": [1]}' }, logs)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
+  expect(asked.length).toBe(1)
+  expect(runs.length).toBe(0)
+  expect(logs.length).toBe(1)
+  expect(logs[0]).toContain('/data/github/auto-merge.json')
+})
+
 test('without CLAUDE_PLUGIN_DATA the list is read from the plugin\'s data directory under HOME', async ($, on) => {
   const runs: any[] = []
   const asked: string[] = []
