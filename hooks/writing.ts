@@ -234,4 +234,6 @@ export function refusal(command: string, found: Violation[]): string {
   return 'gh ' + command + ' refused, its text breaks the writing rules:\n' + lines.join('\n')
     + '\nRewrite the text and call again. If the user asked for this exact text, call again unchanged:'
     + ' the user is then asked whether to send it as it is.'
+    + ' A title or a body taken from a brief, a plan or another session\'s message is not the user\'s exact text:'
+    + ' shorten or rewrite it and name the change in your report.'
 }

@@ -38,7 +38,7 @@ or a review comment, read `WRITING.md` beside this file.
 
 | Subcommand | Arguments | Description |
 |---|---|---|
-| `pr-get` | `[--branch B]` | The PR for a branch, defaulting to the current one |
+| `pr-get` | `[--branch B \| --pr N]` | The PR for a branch, defaulting to the current one, or PR `N` (`{"pr": N}` through the tool). Both answer a list of one PR. An unknown number exits 4 |
 | `pr-list` | | Open PRs |
 | `pr-status` | `<pr>` | State, draft flag, head and base |
 | `pr-checks` | `<pr>` | Combined commit status and check runs |

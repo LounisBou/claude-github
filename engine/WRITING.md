@@ -85,7 +85,9 @@ this work: part of the same batch, the origin of the bug, or a link of that stre
 never a distant link. A follow-up PR, one that must come after this one, is never listed
 in Related PRs. English always, with no
 semicolon. No workflow vocabulary. Every PR is opened as a draft (`pr-create
---draft`, the house default), un-drafted only on the operator's explicit word.
+--draft`, the house default), un-drafted only on the operator's explicit word,
+except in a repository he lists in auto-merge (see the README), where `pr-ready`
+needs no word of his.
 An existing description is never edited without the operator's approval.
 
 ## Security update pull requests

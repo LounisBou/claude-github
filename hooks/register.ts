@@ -80,7 +80,7 @@ async function permit($: any, e: any): Promise<string | undefined> {
       ['Send as it is', 'Deny'], e.command)
   }
 
-  const reserved = reservedToPerson(e.command, args)
+  const reserved = reservedToPerson(e.command, args, e.command === 'pr-ready' && await inAutoMerge($, e))
   if (reserved) return ask($, reserved + ' ' + describe(e) + '?', ['Allow', 'Deny'], e.command)
 
   if (verdict.decision === 'allow') return undefined
@@ -129,12 +129,69 @@ export const NEVER_GRANTED = new Set(['pr-merge', 'comment-delete'])
 
 // The approvals WRITING.md reserves to the person, asked whatever a rule or
 // the mode allows: an existing description is never edited without the
-// operator's approval, and a pull request leaves draft only on his word.
-export function reservedToPerson(command: string, args: Record<string, unknown>): string | undefined {
+// operator's approval, and a pull request leaves draft only on his word,
+// except in a repository he put in auto-merge (autoMerge).
+export function reservedToPerson(command: string, args: Record<string, unknown>, autoMerge = false): string | undefined {
   if (command === 'pr-update' && typeof args.body === 'string') return 'Replace the description of an existing pull request:'
-  if (command === 'pr-ready') return 'Take a pull request out of draft:'
+  if (command === 'pr-ready' && !autoMerge) return 'Take a pull request out of draft:'
   if (command === 'pr-create' && args.draft === false) return 'Open a pull request ready for review, not as a draft:'
   return undefined
+}
+
+// The repositories in auto-merge, as owner/name: there the method takes a pull
+// request out of draft with nobody asked. The file is the operator's, in the
+// host's data directory for this plugin, and nothing here ever writes it.
+export const AUTO_MERGE_FILE = 'auto-merge.json'
+// The data directory under HOME when the host does not name it.
+export const DATA_UNDER_HOME = '/.claude/plugins/data/github-lounisbou'
+// The forms of a GitHub origin URL, as engine/ghlib/repo.py reads them.
+const GITHUB_ORIGIN = /(?:git@github\.com:|https:\/\/github\.com\/)([^/]+)\/(.+?)(?:\.git)?$/
+
+// The listed repositories, lowercased. An absent file lists none, and so does
+// an unreadable or malformed one, which also says so in one log line.
+async function autoMergeRepos($: any): Promise<Set<string>> {
+  let path = ''
+  try {
+    const home = await $.env.get('HOME')
+    const dir = (await $.env.get('CLAUDE_PLUGIN_DATA')) || (home ? home + DATA_UNDER_HOME : '')
+    if (!dir) return new Set()
+    path = dir + '/' + AUTO_MERGE_FILE
+    if (!(await $.fs.exists(path))) return new Set()
+    const listed = JSON.parse(String(await $.fs.read(path))).repositories
+    if (!Array.isArray(listed) || !listed.every((r) => typeof r === 'string')) {
+      throw new Error('"repositories" is not a list of owner/name strings')
+    }
+    return new Set(listed.map((r: string) => r.trim().toLowerCase()))
+  } catch (err: any) {
+    if (path) $.ui.log('github: ' + path + ' unread, every pr-ready is asked: ' + String(err?.message ?? err))
+    return new Set()
+  }
+}
+
+// The repository the engine will act on, in its own order. The call's repo is
+// passed last as --repo=, so it wins over a repo in its args even when empty;
+// an empty or absent one falls through to GH_REPO, then to the checkout's origin.
+async function targetRepo($: any, e: any): Promise<string | undefined> {
+  const override = e.repo !== undefined && e.repo !== null ? e.repo : e.args?.repo
+  for (const named of [override, await $.env.get('GH_REPO')]) {
+    if (named !== undefined && named !== null && String(named) !== '') return String(named)
+  }
+  const r = await $.process.run(['git', 'remote', 'get-url', 'origin'], { timeoutMs: 10_000 })
+  const match = r.exitCode === 0 ? GITHUB_ORIGIN.exec(String(r.stdout).trim()) : null
+  return match ? match[1] + '/' + match[2] : undefined
+}
+
+// Whether a pr-ready goes to a repository in auto-merge. Any doubt answers no,
+// and the person is asked as before.
+async function inAutoMerge($: any, e: any): Promise<boolean> {
+  const listed = await autoMergeRepos($)
+  if (listed.size === 0) return false
+  try {
+    const repo = await targetRepo($, e)
+    return repo !== undefined && listed.has(repo.trim().toLowerCase())
+  } catch {
+    return false
+  }
 }
 
 // Every pull request is opened as a draft unless the call says otherwise,
