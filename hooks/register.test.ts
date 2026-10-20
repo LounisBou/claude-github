@@ -940,6 +940,22 @@ test('a repo in the call names the repository before one in its args', async ($,
   expect(asked.length).toBe(1)
 })
 
+test('an empty repo in the call hides the one in its args, as the engine\'s last --repo= does', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  const reply = (e: any) => e.argv[0] === 'git'
+    ? { exitCode: 0, stdout: 'git@github.com:acme/other.git\n', stderr: '' }
+    : { exitCode: 0, stdout: 'ok', stderr: '' }
+  await stubMod(on, runs, [], reply, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1, repo: 'acme/thing' }, repo: '' })
+  expect(asked.length).toBe(1)
+  expect(runs.map((r) => r.argv[0])).toEqual(['git'])
+})
+
 test('without CLAUDE_PLUGIN_DATA the list is read from the plugin\'s data directory under HOME', async ($, on) => {
   const runs: any[] = []
   const asked: string[] = []

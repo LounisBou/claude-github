@@ -168,10 +168,12 @@ async function autoMergeRepos($: any): Promise<Set<string>> {
   }
 }
 
-// The repository the engine will act on, in its own order: the call's repo,
-// a repo in its args, GH_REPO, then the checkout's origin.
+// The repository the engine will act on, in its own order. The call's repo is
+// passed last as --repo=, so it wins over a repo in its args even when empty;
+// an empty or absent one falls through to GH_REPO, then to the checkout's origin.
 async function targetRepo($: any, e: any): Promise<string | undefined> {
-  for (const named of [e.repo, e.args?.repo, await $.env.get('GH_REPO')]) {
+  const override = e.repo !== undefined && e.repo !== null ? e.repo : e.args?.repo
+  for (const named of [override, await $.env.get('GH_REPO')]) {
     if (named !== undefined && named !== null && String(named) !== '') return String(named)
   }
   const r = await $.process.run(['git', 'remote', 'get-url', 'origin'], { timeoutMs: 10_000 })
