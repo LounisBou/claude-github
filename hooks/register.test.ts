@@ -785,9 +785,13 @@ test('a reserved approval refused by the person runs nothing', async ($, on) => 
 
 // env: the variables $.env.get answers. files: the files $.fs reads, by path,
 // a null text being a file that exists but cannot be read. logs: $.ui.log lines.
-function stubAutoMerge(on: any, env: Record<string, string>, files: Record<string, string | null>, logs: string[] = []) {
+// looked: the paths $.fs.exists was asked about.
+function stubAutoMerge(on: any, env: Record<string, string>, files: Record<string, string | null>, logs: string[] = [], looked: string[] = []) {
   on('env.get', (_$: any, e: any) => ({ value: env[e.name] }))
-  on('fs.exists', (_$: any, e: any) => ({ value: e.path in files }))
+  on('fs.exists', (_$: any, e: any) => {
+    looked.push(e.path)
+    return { value: e.path in files }
+  })
   on('fs.read', (_$: any, e: any) => {
     const text = files[e.path]
     return typeof text === 'string' ? { value: text } : { deny: 'EACCES ' + e.path }
@@ -863,7 +867,7 @@ for (const [what, text] of [['unreadable', null], ['without a list', '{"reposito
   })
 }
 
-test('a description replaced and a pull request opened out of draft on a repository in auto-merge are still asked', async ($, on) => {
+test('a description replaced and a pull request opened out of draft on a repository in auto-merge are not asked', async ($, on) => {
   const runs: any[] = []
   const asked: string[] = []
   await stubMod(on, runs, [], undefined, { decision: 'allow' })
@@ -873,9 +877,130 @@ test('a description replaced and a pull request opened out of draft on a reposit
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-update', args: { pr: 1, body: 'New text' }, repo: 'acme/thing' })
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-create', args: { title: 'fix: x', draft: false }, repo: 'acme/thing' })
+  expect(asked.length).toBe(0)
+  expect(runs.length).toBe(2)
+})
+
+test('a description replaced and a pull request opened out of draft on a repository not in auto-merge are still asked', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-update', args: { pr: 1, body: 'New text' }, repo: 'acme/other' })
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-create', args: { title: 'fix: x', draft: false }, repo: 'acme/other' })
   expect(asked.length).toBe(2)
   expect(asked[0]).toContain('Replace the description')
   expect(asked[1]).toContain('not as a draft')
+  expect(runs.length).toBe(0)
+})
+
+const SOME_WRITES: [string, any][] = [
+  ['pr-comment', { pr: 1, body: 'Thanks.' }],
+  ['pr-merge', { pr: 1 }],
+  ['comment-delete', { id: 5 }],
+]
+
+for (const [command, args] of SOME_WRITES) {
+  test('a ' + command + ' with an ask and no rule on a repository in auto-merge is not asked', async ($, on) => {
+    const runs: any[] = []
+    const asked: string[] = []
+    await stubMod(on, runs, [], undefined, { decision: 'ask' })
+    stubAsk(on, asked, 'Deny')
+    stubAutoMerge(on, DATA, LISTED)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+    const out = await $.tool.call({ tool: 'mcp__github__gh', command, args, repo: 'acme/thing' })
+    expect(out).toEqual({ result: 'ok' })
+    expect(asked.length).toBe(0)
+    expect(runs.length).toBe(1)
+  })
+
+  test('a ' + command + ' with an ask and no rule on a repository not in auto-merge is asked', async ($, on) => {
+    const runs: any[] = []
+    const asked: string[] = []
+    await stubMod(on, runs, [], undefined, { decision: 'ask' })
+    stubAsk(on, asked, 'Deny')
+    stubAutoMerge(on, DATA, LISTED)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+    await $.tool.call({ tool: 'mcp__github__gh', command, args, repo: 'acme/other' })
+    expect(asked.length).toBe(1)
+    expect(runs.length).toBe(0)
+  })
+
+  test('a ' + command + ' with an ask from a rule on a repository in auto-merge is still asked', async ($, on) => {
+    const runs: any[] = []
+    const asked: string[] = []
+    await stubMod(on, runs, [], undefined, { decision: 'ask', rule: 'mcp__github__gh' })
+    stubAsk(on, asked, 'Deny')
+    stubAutoMerge(on, DATA, LISTED)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+    await $.tool.call({ tool: 'mcp__github__gh', command, args, repo: 'acme/thing' })
+    expect(asked.length).toBe(1)
+    expect(runs.length).toBe(0)
+  })
+
+  test('a ' + command + ' denied by a rule on a repository in auto-merge is refused', async ($, on) => {
+    const runs: any[] = []
+    const asked: string[] = []
+    await stubMod(on, runs, [], undefined, { decision: 'deny', reason: 'denied by rule', rule: 'mcp__github__gh' })
+    stubAsk(on, asked, 'Allow')
+    stubAutoMerge(on, DATA, LISTED)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+    const out: any = await $.tool.call({ tool: 'mcp__github__gh', command, args, repo: 'acme/thing' })
+    expect(JSON.stringify(out)).toContain('denied by rule')
+    expect(asked.length).toBe(0)
+    expect(runs.length).toBe(0)
+  })
+}
+
+test('a read on a repository in auto-merge does not read the auto-merge file', async ($, on) => {
+  const runs: any[] = []
+  const reads: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask' })
+  stubAsk(on, [], 'Deny')
+  stubAutoMerge(on, DATA, LISTED, [], reads)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-list', repo: 'acme/thing' })
+  expect(out).toEqual({ result: 'ok' })
+  expect(reads).toEqual([])
+})
+
+test('a write reads the auto-merge file once', async ($, on) => {
+  const runs: any[] = []
+  const reads: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask' })
+  stubAsk(on, [], 'Deny')
+  stubAutoMerge(on, DATA, LISTED, [], reads)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
+  expect(reads.length).toBe(1)
+})
+
+test('a body refused by the writing rules on a repository in auto-merge is still refused', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const call = { tool: 'mcp__github__gh', command: 'pr-comment', args: { pr: 1, body: 'It works; it is done.' }, repo: 'acme/thing' }
+  const out: any = await $.tool.call(call)
+  expect(JSON.stringify(out)).toContain('semicolon')
+  expect(asked.length).toBe(0)
+  expect(runs.length).toBe(0)
+  // The same text again goes to the person, as elsewhere.
+  await $.tool.call(call)
+  expect(asked.length).toBe(1)
+  expect(asked[0]).toContain('writing rules')
   expect(runs.length).toBe(0)
 })
 

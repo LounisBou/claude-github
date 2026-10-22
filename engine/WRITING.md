@@ -88,7 +88,8 @@ semicolon. No workflow vocabulary. Every PR is opened as a draft (`pr-create
 --draft`, the house default), un-drafted only on the operator's explicit word,
 except in a repository he lists in auto-merge (see the README), where `pr-ready`
 needs no word of his.
-An existing description is never edited without the operator's approval.
+An existing description is never edited without the operator's approval, except
+in a repository he lists in auto-merge, where asking held agents on a dialog nobody answers.
 
 ## Security update pull requests
 
