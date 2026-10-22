@@ -60,6 +60,10 @@ async function runGh($: any, command: string, args: Record<string, unknown> = {}
  * the mechanical ones refuse a text before it leaves the machine, and the
  * approvals the file reserves to the person (an existing description, a pull
  * request out of draft) are asked whatever the settings allow.
+ *
+ * In a repository in auto-merge no write is put to the person: the reserved
+ * approvals lift and an ask with no rule behind it runs. A deny and an ask
+ * from an explicit rule stand, and so do the mechanical writing rules.
  */
 async function permit($: any, e: any): Promise<string | undefined> {
   const input = { command: e.command, args: e.args, repo: e.repo }
@@ -80,11 +84,14 @@ async function permit($: any, e: any): Promise<string | undefined> {
       ['Send as it is', 'Deny'], e.command)
   }
 
-  const reserved = reservedToPerson(e.command, args, e.command === 'pr-ready' && await inAutoMerge($, e))
+  // Read once per call, for a write only.
+  const autoMerge = !READS.has(e.command) && await inAutoMerge($, e)
+  const reserved = reservedToPerson(e.command, args, autoMerge)
   if (reserved) return ask($, reserved + ' ' + describe(e) + '?', ['Allow', 'Deny'], e.command)
 
   if (verdict.decision === 'allow') return undefined
   if (READS.has(e.command) && !verdict.rule) return undefined
+  if (autoMerge && !verdict.rule) return undefined
 
   // A grant for the session stands in for an ask no rule demanded, and only
   // for the command and repository it was given on.
@@ -130,16 +137,18 @@ export const NEVER_GRANTED = new Set(['pr-merge', 'comment-delete'])
 // The approvals WRITING.md reserves to the person, asked whatever a rule or
 // the mode allows: an existing description is never edited without the
 // operator's approval, and a pull request leaves draft only on his word,
-// except in a repository he put in auto-merge (autoMerge).
+// except in a repository he put in auto-merge (autoMerge), where nothing is
+// reserved.
 export function reservedToPerson(command: string, args: Record<string, unknown>, autoMerge = false): string | undefined {
+  if (autoMerge) return undefined
   if (command === 'pr-update' && typeof args.body === 'string') return 'Replace the description of an existing pull request:'
-  if (command === 'pr-ready' && !autoMerge) return 'Take a pull request out of draft:'
+  if (command === 'pr-ready') return 'Take a pull request out of draft:'
   if (command === 'pr-create' && args.draft === false) return 'Open a pull request ready for review, not as a draft:'
   return undefined
 }
 
-// The repositories in auto-merge, as owner/name: there the method takes a pull
-// request out of draft with nobody asked. The file is the operator's, in the
+// The repositories in auto-merge, as owner/name: there no write is put to the
+// person. The file is the operator's, in the
 // host's data directory for this plugin, and nothing here ever writes it.
 export const AUTO_MERGE_FILE = 'auto-merge.json'
 // The data directory under HOME when the host does not name it.
@@ -163,7 +172,7 @@ async function autoMergeRepos($: any): Promise<Set<string>> {
     }
     return new Set(listed.map((r: string) => r.trim().toLowerCase()))
   } catch (err: any) {
-    if (path) $.ui.log('github: ' + path + ' unread, every pr-ready is asked: ' + String(err?.message ?? err))
+    if (path) $.ui.log('github: ' + path + ' unread, every write is asked: ' + String(err?.message ?? err))
     return new Set()
   }
 }
@@ -181,7 +190,7 @@ async function targetRepo($: any, e: any): Promise<string | undefined> {
   return match ? match[1] + '/' + match[2] : undefined
 }
 
-// Whether a pr-ready goes to a repository in auto-merge. Any doubt answers no,
+// Whether a write goes to a repository in auto-merge. Any doubt answers no,
 // and the person is asked as before.
 async function inAutoMerge($: any, e: any): Promise<boolean> {
   const listed = await autoMergeRepos($)
