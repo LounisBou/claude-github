@@ -107,6 +107,16 @@ test('a non-zero gh.py exit returns isError with stderr', async ($, on) => {
   expect(out.result).toBe('error: not found')
 })
 
+test('a line gh.py prints on stderr after a success follows the tool output', async ($, on) => {
+  const runs: any[] = []
+  const writes: any[] = []
+  await stubMod(on, runs, writes, { exitCode: 0, stdout: '{"number": 12}\n', stderr: 'error: label not-ready on pull request 12 failed: boom\n' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-create', args: { title: 'T', draft: true } })
+  expect(out).toEqual({ result: '{"number": 12}\nerror: label not-ready on pull request 12 failed: boom' })
+})
+
 test('a rejected process.run surfaces as isError, not a skipped hook', async ($, on) => {
   const runs: any[] = []
   const writes: any[] = []

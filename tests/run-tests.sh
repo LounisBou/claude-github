@@ -1077,9 +1077,9 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.9.0" \
+check "manifest version" "0.10.0" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.9.0 0.9.0" \
+check "marketplace version matches" "0.10.0 0.10.0" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
@@ -1679,6 +1679,140 @@ PYENUM
 )
 check "the mod's COMMANDS match the engine's subcommands" "" "$enum_drift"
 
+
+echo "== Ready and Not Ready labels =="
+
+# One fixture directory per scenario, so the recorded requests of one never
+# show in the next. sent7 prints the requests that carry a body or change state.
+new7() { F7="$WORK/fix7-$1"; rm -rf "$F7"; mkdir -p "$F7"; }
+gh7() { env GH_FIXTURES="$F7" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
+# net7 runs gh.py with every label request failing as a dropped connection.
+net7() {
+  env GH_FIXTURES="$F7" GH_TOKEN=x GH_REPO=acme/thing python3 -c "
+import sys, urllib.error
+sys.path.insert(0, sys.argv[1])
+import gh
+from ghlib import http
+real = http._call
+def call(method, path, *rest, **kw):
+    if '/labels' in path:
+        raise urllib.error.URLError('connection dropped')
+    return real(method, path, *rest, **kw)
+http._call = call
+sys.exit(gh.main(sys.argv[2:]))
+" "$GHDIR" "$@"
+}
+sent7() {
+  python3 -c "
+import json, sys
+for line in open(sys.argv[1] + '/sent.jsonl'):
+    row = json.loads(line)
+    if row['method'] != 'GET' and row['path'] != '/graphql':
+        print(row['method'], row['path'], json.dumps(row['body'], sort_keys=True))
+" "$F7" 2>/dev/null
+}
+
+new7 ensure-empty
+check "labels-ensure creates both labels on a bare repository" "created Ready
+created Not Ready" "$(gh7 labels-ensure)"
+check "labels-ensure sends the house names and colours, no description" \
+  'POST /repos/acme/thing/labels {"color": "27e760", "name": "Ready"}
+POST /repos/acme/thing/labels {"color": "8c1455", "name": "Not Ready"}' "$(sent7)"
+
+new7 ensure-present
+printf '%s' '[{"name":"ready","color":"ffffff"},{"name":"Not Ready","color":"8c1455"},{"name":"bug","color":"d73a4a"}]' \
+  > "$F7/GET_repos_acme_thing_labels__per_page=100.json"
+check "labels-ensure reports a label present, with its colour when it differs" "present ready #ffffff
+present Not Ready" "$(gh7 labels-ensure)"
+check "labels-ensure never renames or recolours a present label" "" "$(sent7)"
+
+new7 ready-swap
+printf '%s' '[{"name":"Ready","color":"27e760"},{"name":"Not Ready","color":"8c1455"}]' \
+  > "$F7/GET_repos_acme_thing_labels__per_page=100.json"
+printf '%s' '[{"name":"Not Ready"},{"name":"bug"}]' \
+  > "$F7/GET_repos_acme_thing_issues_7_labels__per_page=100.json"
+check "pr-readiness ready prints the state now carried" "ready" "$(gh7 pr-readiness 7 ready)"
+check "pr-readiness adds the wanted label and removes the other" \
+  'POST /repos/acme/thing/issues/7/labels {"labels": ["Ready"]}
+DELETE /repos/acme/thing/issues/7/labels/Not%20Ready null' "$(sent7)"
+
+new7 ready-carried-spelling
+printf '%s' '[{"name":"Ready","color":"27e760"},{"name":"Not Ready","color":"8c1455"}]' \
+  > "$F7/GET_repos_acme_thing_labels__per_page=100.json"
+printf '%s' '[{"name":"NOT READY"}]' > "$F7/GET_repos_acme_thing_issues_7_labels__per_page=100.json"
+gh7 pr-readiness 7 ready >/dev/null
+check "pr-readiness removes the other label under the spelling the pull request carries" \
+  'POST /repos/acme/thing/issues/7/labels {"labels": ["Ready"]}
+DELETE /repos/acme/thing/issues/7/labels/NOT%20READY null' "$(sent7)"
+
+new7 ready-idempotent
+printf '%s' '[{"name":"Ready","color":"27e760"},{"name":"Not Ready","color":"8c1455"}]' \
+  > "$F7/GET_repos_acme_thing_labels__per_page=100.json"
+printf '%s' '[{"name":"Ready"}]' > "$F7/GET_repos_acme_thing_issues_7_labels__per_page=100.json"
+check "pr-readiness says so when nothing changes" "ready (unchanged)" "$(gh7 pr-readiness 7 ready)"
+check "pr-readiness changes nothing on a second call" "" "$(sent7)"
+
+new7 notready-creates
+printf '%s' '[{"name":"Ready"}]' > "$F7/GET_repos_acme_thing_issues_7_labels__per_page=100.json"
+check "pr-readiness not-ready creates the missing labels first" "created Ready
+created Not Ready
+not-ready" "$(gh7 pr-readiness 7 not-ready)"
+check "pr-readiness not-ready swaps the label" \
+  'POST /repos/acme/thing/labels {"color": "27e760", "name": "Ready"}
+POST /repos/acme/thing/labels {"color": "8c1455", "name": "Not Ready"}
+POST /repos/acme/thing/issues/7/labels {"labels": ["Not Ready"]}
+DELETE /repos/acme/thing/issues/7/labels/Ready null' "$(sent7)"
+
+check_status "pr-readiness refuses an unknown state" 1 gh7 pr-readiness 7 maybe
+
+new7 create-draft
+printf '%s' '{"number":12,"html_url":"https://github.com/acme/thing/pull/12"}' > "$F7/POST_repos_acme_thing_pulls.json"
+check "pr-create --draft still answers the new number" "12" \
+  "$(gh7 pr-create --title T --head feature-x --draft --format pr-number)"
+check "pr-create --draft puts Not Ready on the pull request" \
+  'POST /repos/acme/thing/pulls {"base": "main", "body": "", "draft": true, "head": "feature-x", "title": "T"}
+POST /repos/acme/thing/labels {"color": "27e760", "name": "Ready"}
+POST /repos/acme/thing/labels {"color": "8c1455", "name": "Not Ready"}
+POST /repos/acme/thing/issues/12/labels {"labels": ["Not Ready"]}' "$(sent7)"
+
+new7 create-ready
+printf '%s' '{"number":12,"html_url":"https://github.com/acme/thing/pull/12"}' > "$F7/POST_repos_acme_thing_pulls.json"
+gh7 pr-create --title T --head feature-x >/dev/null
+check "pr-create without --draft puts Ready on the pull request" \
+  'POST /repos/acme/thing/issues/12/labels {"labels": ["Ready"]}' "$(sent7 | grep '/issues/')"
+
+new7 create-label-fails
+printf '%s' '{"number":12,"html_url":"https://github.com/acme/thing/pull/12"}' > "$F7/POST_repos_acme_thing_pulls.json"
+printf '%s' '{"__status":500,"message":"boom"}' > "$F7/POST_repos_acme_thing_issues_12_labels.json"
+gh7 pr-create --title T --head feature-x --draft --format pr-number >"$WORK/out7" 2>"$WORK/err7"
+check "a label failure leaves pr-create succeeding" "0 12" "$(echo $? | tr -d '\n') $(cat "$WORK/out7")"
+check "a label failure is printed on its own line" "1" "$(grep -c '^error: label' "$WORK/err7")"
+
+new7 create-label-network-fails
+printf '%s' '{"number":12,"html_url":"https://github.com/acme/thing/pull/12"}' > "$F7/POST_repos_acme_thing_pulls.json"
+net7 pr-create --title T --head feature-x --draft --format pr-number >"$WORK/out7" 2>"$WORK/err7"
+check "a network failure while labelling leaves pr-create succeeding" "0 12" "$(echo $? | tr -d '\n') $(cat "$WORK/out7")"
+check "a network failure while labelling is printed on its own line" "1" "$(grep -c '^error: label' "$WORK/err7")"
+check "a network failure while labelling prints no traceback" "0" "$(grep -c 'Traceback' "$WORK/err7")"
+
+new7 ready-label-fails
+printf '%s' '{"number":7,"node_id":"PR_x"}' > "$F7/GET_repos_acme_thing_pulls_7.json"
+printf '%s' '{"__status":500,"message":"boom"}' > "$F7/POST_repos_acme_thing_issues_7_labels.json"
+gh7 pr-ready 7 >/dev/null 2>"$WORK/err7"
+check "a label failure leaves pr-ready succeeding" "0" "$?"
+check "a label failure on pr-ready is printed on its own line" "1" "$(grep -c '^error: label' "$WORK/err7")"
+
+new7 ready-out-of-draft
+printf '%s' '{"number":7,"node_id":"PR_x"}' > "$F7/GET_repos_acme_thing_pulls_7.json"
+gh7 pr-ready 7 >/dev/null
+check "pr-ready puts Ready on the pull request" \
+  'POST /repos/acme/thing/issues/7/labels {"labels": ["Ready"]}' "$(sent7 | grep '/issues/')"
+
+check "stdin json maps pr-readiness positionals by name" \
+  "pr-readiness -- 12 not-ready" \
+  "$(argv6 '{"command":"pr-readiness","args":{"pr":12,"state":"not-ready"}}')"
+check "stdin json accepts labels-ensure with no positional" \
+  "labels-ensure" "$(argv6 '{"command":"labels-ensure"}')"
 
 echo
 echo "$pass passed, $fail failed"

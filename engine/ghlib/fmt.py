@@ -11,7 +11,13 @@ def _first(obj):
     return obj
 
 
+class Lines(str):
+    """Plain text lines a subcommand prints as they are, not as JSON."""
+
+
 def _raw(obj):
+    if isinstance(obj, Lines):
+        return str(obj)
     return json.dumps(obj, indent=2, sort_keys=True)
 
 

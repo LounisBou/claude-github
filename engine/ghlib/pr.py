@@ -8,7 +8,7 @@ import subprocess
 import time
 from urllib.parse import quote
 
-from . import bodies, errors, http, repo
+from . import bodies, errors, http, meta, repo
 
 
 def _current_branch():
@@ -125,7 +125,10 @@ def pr_create(args):
         raise errors.UsageError("cannot determine the head branch; pass --head")
     if args.draft:
         payload["draft"] = True
-    return http.rest("POST", "/repos/%s/%s/pulls" % (owner, name), payload)
+    created = http.rest("POST", "/repos/%s/%s/pulls" % (owner, name), payload)
+    if isinstance(created, dict) and created.get("number"):
+        meta.follow_readiness(owner, name, created["number"], "not-ready" if args.draft else "ready")
+    return created
 
 
 _MERGE_POLL = 3
