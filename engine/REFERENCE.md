@@ -46,7 +46,7 @@ or a review comment, read `WRITING.md` beside this file.
 | `pr-files` | `<pr>` | Changed paths with their patches, paginated |
 | `pr-commits` | `<pr>` | Commits on the PR, paginated |
 | `file-at-ref` | `<path> <ref>` | A file's contents at a ref |
-| `pr-create` | `--title T [--body-file P] [--base B] [--head H] [--draft]` | Open a PR from the current branch, `--draft` for a draft (the house default) |
+| `pr-create` | `--title T [--body-file P] [--base B] [--head H] [--draft]` | Open a PR from the current branch, `--draft` for a draft (the house default). A draft gets the `Not Ready` label, any other PR the `Ready` one. A label failure is printed as an `error:` line on stderr and does not fail the command |
 | `pr-merge` | `<pr> [--method merge\|squash\|rebase] [--sha SHA]` | Merge a PR, optionally pinned to the head that was verified |
 
 `file-at-ref` returns `content`, plus `binary`. When the file is not valid UTF-8,
@@ -111,7 +111,9 @@ to `RIGHT`). `commit_id` is the PR head, read by the tool. The request carries n
 | Subcommand | Arguments | Description |
 |---|---|---|
 | `pr-update` | `<pr> [--title T] [--body-file P] [--base B] [--state open\|closed]` | Change a PR's fields |
-| `pr-ready` | `<pr>` | Mark a draft ready for review |
+| `pr-ready` | `<pr>` | Mark a draft ready for review, and put the `Ready` label on it |
+| `pr-readiness` | `<pr> <ready\|not-ready>` | Put `Ready` or `Not Ready` on a PR and take the other off, creating the labels when missing. Prints the state now carried, `(unchanged)` after it when nothing changed |
+| `labels-ensure` | | Create `Ready` (`27e760`) and `Not Ready` (`8c1455`) when missing, no description. A label already there under that name, in any case, is left as it is. One line per label: `created <name>` or `present <name>`, with ` #<colour>` when it differs from the house colour |
 | `label-add` | `<pr> <label>...` | Add labels |
 | `label-remove` | `<pr> <label>` | Remove one label — GitHub deletes one per call |
 | `reviewer-add` / `reviewer-remove` | `<pr> <user>...` | Request or drop reviewers |

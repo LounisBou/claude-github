@@ -57,6 +57,12 @@ it. `/github:doctor` then confirms everything is ready.
   and leaving draft (`draft: false`, `pr-ready`) or replacing an existing
   description is always asked, whatever the rules allow. The one exception
   is a repository in auto-merge (below).
+- **Ready and Not Ready labels** — `pr-readiness <pr> ready|not-ready` puts
+  the `Ready` (`27e760`) or `Not Ready` (`8c1455`) label on a pull request and
+  takes the other off, and `labels-ensure` creates both on a repository that
+  lacks them. `pr-create` labels the new pull request (`Not Ready` for a draft,
+  `Ready` otherwise) and `pr-ready` puts `Ready` on it, so the label says what
+  the draft flag says. A label failure never fails the command it follows.
 - **`/checks [pr]`** — combined CI status of a PR, with the failed checks
   named, defaulting to the current branch's.
 - **`/threads [pr]`** — the open review threads of a PR, as a markdown table.
