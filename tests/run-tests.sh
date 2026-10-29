@@ -1720,6 +1720,15 @@ check "pr-readiness adds the wanted label and removes the other" \
   'POST /repos/acme/thing/issues/7/labels {"labels": ["Ready"]}
 DELETE /repos/acme/thing/issues/7/labels/Not%20Ready null' "$(sent7)"
 
+new7 ready-carried-spelling
+printf '%s' '[{"name":"Ready","color":"27e760"},{"name":"Not Ready","color":"8c1455"}]' \
+  > "$F7/GET_repos_acme_thing_labels__per_page=100.json"
+printf '%s' '[{"name":"NOT READY"}]' > "$F7/GET_repos_acme_thing_issues_7_labels__per_page=100.json"
+gh7 pr-readiness 7 ready >/dev/null
+check "pr-readiness removes the other label under the spelling the pull request carries" \
+  'POST /repos/acme/thing/issues/7/labels {"labels": ["Ready"]}
+DELETE /repos/acme/thing/issues/7/labels/NOT%20READY null' "$(sent7)"
+
 new7 ready-idempotent
 printf '%s' '[{"name":"Ready","color":"27e760"},{"name":"Not Ready","color":"8c1455"}]' \
   > "$F7/GET_repos_acme_thing_labels__per_page=100.json"
@@ -1762,6 +1771,13 @@ printf '%s' '{"__status":500,"message":"boom"}' > "$F7/POST_repos_acme_thing_iss
 gh7 pr-create --title T --head feature-x --draft --format pr-number >"$WORK/out7" 2>"$WORK/err7"
 check "a label failure leaves pr-create succeeding" "0 12" "$(echo $? | tr -d '\n') $(cat "$WORK/out7")"
 check "a label failure is printed on its own line" "1" "$(grep -c '^error: label' "$WORK/err7")"
+
+new7 ready-label-fails
+printf '%s' '{"number":7,"node_id":"PR_x"}' > "$F7/GET_repos_acme_thing_pulls_7.json"
+printf '%s' '{"__status":500,"message":"boom"}' > "$F7/POST_repos_acme_thing_issues_7_labels.json"
+gh7 pr-ready 7 >/dev/null 2>"$WORK/err7"
+check "a label failure leaves pr-ready succeeding" "0" "$?"
+check "a label failure on pr-ready is printed on its own line" "1" "$(grep -c '^error: label' "$WORK/err7")"
 
 new7 ready-out-of-draft
 printf '%s' '{"number":7,"node_id":"PR_x"}' > "$F7/GET_repos_acme_thing_pulls_7.json"
