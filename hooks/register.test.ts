@@ -495,6 +495,17 @@ test('a write that needs permission is refused when nobody can be asked', async 
   expect(runs.length).toBe(0)
 })
 
+test('a write no session grant covers is refused when nobody can be asked', async ($, on) => {
+  const runs: any[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask' })
+  stubAsk(on, [], undefined)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-merge', args: { pr: 1 } })
+  expect(JSON.stringify(out)).toContain('nobody could be asked')
+  expect(runs.length).toBe(0)
+})
+
 test('a truncated engine output says so', async ($, on) => {
   await stubMod(on, [], [], { exitCode: 0, stdout: 'diff', stderr: '', isStdoutTruncated: true })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
