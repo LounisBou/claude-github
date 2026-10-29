@@ -21,7 +21,7 @@ export const COMMANDS = [
   'comments-resolved-batch', 'review-submit', 'review-pending-create',
   'review-pending-add', 'review-pending', 'repo-review-comments', 'pr-update',
   'pr-ready', 'label-add', 'label-remove', 'reviewer-add', 'reviewer-remove',
-  'assignee-add', 'assignee-remove', 'issue-view', 'issue-list',
+  'assignee-add', 'assignee-remove', 'labels-ensure', 'pr-readiness', 'issue-view', 'issue-list',
   'issue-search', 'pr-linked-issues', 'image-upload', 'auth-check',
 ]
 
@@ -39,13 +39,18 @@ export const TOOL = 'mcp__github__gh'
 // The request travels as JSON on stdin: gh.py maps it onto its own parser,
 // refuses what that parser does not declare, and writes the bodies to a
 // private directory it removes. No argv is built and no file written here.
-async function runGh($: any, command: string, args: Record<string, unknown> = {}, repo?: string): Promise<string> {
+// notes: a call that succeeds can still print a line on stderr (a label that could not
+// be set after a pull request was opened). The tool shows it after the output.
+async function runGh(
+  $: any, command: string, args: Record<string, unknown> = {}, repo?: string, notes = false,
+): Promise<string> {
   const r = await $.process.run(
     ['python3', $.plugin.root + '/engine/gh.py', '--stdin-json'],
     { stdin: JSON.stringify({ command, args, repo }), timeoutMs: 120_000 },
   )
   if (r.exitCode !== 0) throw new Error(r.stderr || 'gh.py exited ' + r.exitCode)
-  return r.isStdoutTruncated ? r.stdout + '\n[output cut at 4 MiB]' : r.stdout
+  const out = r.isStdoutTruncated ? r.stdout + '\n[output cut at 4 MiB]' : r.stdout
+  return notes && r.stderr?.trim() ? out.trimEnd() + '\n' + r.stderr.trim() : out
 }
 
 /*
@@ -465,7 +470,7 @@ export function register(on: any): void {
     const refused = await permit($, e)
     if (refused) return { deny: refused }
     try {
-      const result = await runGh($, e.command, e.args, e.repo) || '(no output)'
+      const result = await runGh($, e.command, e.args, e.repo, true) || '(no output)'
       // A write changes what the open pane shows: read it again, unawaited.
       if (watch && !READS.has(e.command)) void refresh($)
       return { result }
