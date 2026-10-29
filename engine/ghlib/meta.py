@@ -127,11 +127,14 @@ def pr_readiness(args):
 
 def follow_readiness(owner, name, pr, state):
     """The labelling a pull request command does after its own work. A failure
-    here never fails that command: it is printed on its own line on stderr."""
+    here never fails that command: it is printed on its own line on stderr. A
+    network failure is an OSError, which http._request does not convert."""
     try:
         _set_readiness(owner, name, pr, state)
     except errors.GhError as exc:
         print("error: label %s on pull request %s failed: %s" % (state, pr, exc.message), file=sys.stderr)
+    except OSError as exc:
+        print("error: label %s on pull request %s failed: %s" % (state, pr, exc), file=sys.stderr)
 
 
 def reviewer_add(args):

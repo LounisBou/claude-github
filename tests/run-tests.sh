@@ -1686,6 +1686,22 @@ echo "== Ready and Not Ready labels =="
 # show in the next. sent7 prints the requests that carry a body or change state.
 new7() { F7="$WORK/fix7-$1"; rm -rf "$F7"; mkdir -p "$F7"; }
 gh7() { env GH_FIXTURES="$F7" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
+# net7 runs gh.py with every label request failing as a dropped connection.
+net7() {
+  env GH_FIXTURES="$F7" GH_TOKEN=x GH_REPO=acme/thing python3 -c "
+import sys, urllib.error
+sys.path.insert(0, sys.argv[1])
+import gh
+from ghlib import http
+real = http._call
+def call(method, path, *rest, **kw):
+    if '/labels' in path:
+        raise urllib.error.URLError('connection dropped')
+    return real(method, path, *rest, **kw)
+http._call = call
+sys.exit(gh.main(sys.argv[2:]))
+" "$GHDIR" "$@"
+}
 sent7() {
   python3 -c "
 import json, sys
@@ -1771,6 +1787,13 @@ printf '%s' '{"__status":500,"message":"boom"}' > "$F7/POST_repos_acme_thing_iss
 gh7 pr-create --title T --head feature-x --draft --format pr-number >"$WORK/out7" 2>"$WORK/err7"
 check "a label failure leaves pr-create succeeding" "0 12" "$(echo $? | tr -d '\n') $(cat "$WORK/out7")"
 check "a label failure is printed on its own line" "1" "$(grep -c '^error: label' "$WORK/err7")"
+
+new7 create-label-network-fails
+printf '%s' '{"number":12,"html_url":"https://github.com/acme/thing/pull/12"}' > "$F7/POST_repos_acme_thing_pulls.json"
+net7 pr-create --title T --head feature-x --draft --format pr-number >"$WORK/out7" 2>"$WORK/err7"
+check "a network failure while labelling leaves pr-create succeeding" "0 12" "$(echo $? | tr -d '\n') $(cat "$WORK/out7")"
+check "a network failure while labelling is printed on its own line" "1" "$(grep -c '^error: label' "$WORK/err7")"
+check "a network failure while labelling prints no traceback" "0" "$(grep -c 'Traceback' "$WORK/err7")"
 
 new7 ready-label-fails
 printf '%s' '{"number":7,"node_id":"PR_x"}' > "$F7/GET_repos_acme_thing_pulls_7.json"
