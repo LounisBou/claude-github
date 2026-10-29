@@ -58,7 +58,9 @@ async function stubMod(
   on('session.start', () => ({ cwd: '/work' }))
   on('session.id', () => ({ value: 'session-1' }))
   on('session.cwd', () => ({ value: '/work' }))
-  on('tool.check', () => verdict)
+  // The dialog a $.ui.ask raises is itself checked: it must not meet the verdict
+  // meant for the gh call.
+  on('tool.check', (_$: any, e: any) => (e.tool === 'AskUserQuestion' ? { decision: 'allow' } : verdict))
   on('tool.register', () => ({ value: undefined }))
   on('command.register', () => ({ value: undefined }))
   on('fs.write', (_$: any, e: any) => {
@@ -489,6 +491,17 @@ test('a write that needs permission is refused when nobody can be asked', async 
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
 
   const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-comment', args: { pr: 1, body: 'x' } })
+  expect(JSON.stringify(out)).toContain('nobody could be asked')
+  expect(runs.length).toBe(0)
+})
+
+test('a write no session grant covers is refused when nobody can be asked', async ($, on) => {
+  const runs: any[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask' })
+  stubAsk(on, [], undefined)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-merge', args: { pr: 1 } })
   expect(JSON.stringify(out)).toContain('nobody could be asked')
   expect(runs.length).toBe(0)
 })
@@ -1262,7 +1275,7 @@ test('a grant never passes a text that breaks a rule, nor a deny verdict', async
   on('session.start', () => ({ cwd: '/work' }))
   on('session.id', () => ({ value: 'session-1' }))
   on('session.cwd', () => ({ value: '/work' }))
-  on('tool.check', () => verdict)
+  on('tool.check', (_$: any, e: any) => (e.tool === 'AskUserQuestion' ? { decision: 'allow' } : verdict))
   on('tool.register', () => ({ value: undefined }))
   on('command.register', () => ({ value: undefined }))
   on('process.run', (_$: any, e: any) => {
@@ -1307,7 +1320,7 @@ test('a grant on the origin repository holds for its directory and its session o
   on('session.start', () => ({ cwd: '/work' }))
   on('session.id', () => ({ value: session }))
   on('session.cwd', () => ({ value: cwd }))
-  on('tool.check', () => ({ decision: 'ask' }))
+  on('tool.check', (_$: any, e: any) => ({ decision: e.tool === 'AskUserQuestion' ? 'allow' : 'ask' }))
   on('tool.register', () => ({ value: undefined }))
   on('command.register', () => ({ value: undefined }))
   on('process.run', (_$: any, e: any) => {
