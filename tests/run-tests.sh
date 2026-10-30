@@ -1077,9 +1077,9 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.10.1" \
+check "manifest version" "0.10.2" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.10.1 0.10.1" \
+check "marketplace version matches" "0.10.2 0.10.2" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
@@ -1164,7 +1164,7 @@ check "WRITING.md headings are in order" \
 check "REFERENCE.md points at WRITING.md" "1" \
   "$(grep -cF 'read `WRITING.md` beside this file' "$SKILLDOC")"
 
-for needle in '--draft' '**TODO Staging:**' '**TODO Prod:**' '**PRs Dependency:**' '**Related PRs:**' 'TODO Staging or TODO Prod item is a task-list checkbox' 'A TODO item stands alone' '"do the same edit"' 'the value before and after' 'checkbox, one action' 'never joined by "then" or "and run"' 'follow-up' 'mandatory' 'kept apart' 'no semicolon' 'never edited without' 'heading' '| Advisory |' 'locked at' 'one table per advisory' 'is a markdown link to its advisory'; do
+for needle in '--draft' '**TODO Staging:**' '**TODO Prod:**' '**PRs Dependency:**' '**Related PRs:**' 'TODO Staging or TODO Prod item is a task-list checkbox' 'A TODO item stands alone' '"do the same edit"' 'the value before and after' 'checkbox, one action' 'never joined by "then" or "and run"' 'follow-up' 'mandatory' 'kept apart' 'no semicolon' 'replaced without asking' 'heading' '| Advisory |' 'locked at' 'one table per advisory' 'is a markdown link to its advisory'; do
   check "WRITING.md mentions '$needle'" "1" \
     "$(grep -qF -- "$needle" "$WRITINGDOC" && echo 1 || echo 0)"
 done

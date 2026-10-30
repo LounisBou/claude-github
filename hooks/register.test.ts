@@ -763,7 +763,7 @@ test('pr-create is sent as a draft when the call does not say', async ($, on) =>
   expect(runs[0].args.draft).toBe(true)
 })
 
-test('a pr-create out of draft, a pr-ready and a description edit are asked even when a rule allows', async ($, on) => {
+test('a pr-create out of draft and a pr-ready are asked even when a rule allows', async ($, on) => {
   const runs: any[] = []
   const asked: string[] = []
   await stubMod(on, runs, [], undefined, { decision: 'allow' })
@@ -772,12 +772,10 @@ test('a pr-create out of draft, a pr-ready and a description edit are asked even
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-create', args: { title: 'fix: x', draft: false } })
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
-  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-update', args: { pr: 1, body: 'New text' } })
-  expect(asked.length).toBe(3)
+  expect(asked.length).toBe(2)
   expect(asked[0]).toContain('not as a draft')
   expect(asked[1]).toContain('out of draft')
-  expect(asked[2]).toContain('Replace the description')
-  expect(runs.length).toBe(3)
+  expect(runs.length).toBe(2)
   expect(runs[0].args.draft).toBe(false)
 })
 
@@ -904,7 +902,7 @@ test('a description replaced and a pull request opened out of draft on a reposit
   expect(runs.length).toBe(2)
 })
 
-test('a description replaced and a pull request opened out of draft on a repository not in auto-merge are still asked', async ($, on) => {
+test('a pull request opened out of draft on a repository not in auto-merge is still asked, a description replaced is not', async ($, on) => {
   const runs: any[] = []
   const asked: string[] = []
   await stubMod(on, runs, [], undefined, { decision: 'allow' })
@@ -913,11 +911,59 @@ test('a description replaced and a pull request opened out of draft on a reposit
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-update', args: { pr: 1, body: 'New text' }, repo: 'acme/other' })
+  expect(asked.length).toBe(0)
+  expect(runs.length).toBe(1)
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-create', args: { title: 'fix: x', draft: false }, repo: 'acme/other' })
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/other' })
   expect(asked.length).toBe(2)
-  expect(asked[0]).toContain('Replace the description')
-  expect(asked[1]).toContain('not as a draft')
+  expect(asked[0]).toContain('not as a draft')
+  expect(asked[1]).toContain('out of draft')
+  expect(runs.length).toBe(1)
+})
+
+test('a description replaced is refused under a deny rule', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'deny', reason: 'denied by rule', rule: 'mcp__github__gh' })
+  stubAsk(on, asked, 'Allow')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-update', args: { pr: 1, body: 'New text' }, repo: 'acme/other' })
+  expect(JSON.stringify(out)).toContain('denied by rule')
+  expect(asked.length).toBe(0)
   expect(runs.length).toBe(0)
+})
+
+test('a description replaced under an ask from a rule is still asked', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'ask', rule: 'mcp__github__gh' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-update', args: { pr: 1, body: 'New text' }, repo: 'acme/other' })
+  expect(asked.length).toBe(1)
+  expect(runs.length).toBe(0)
+})
+
+test('a description replaced with a text that breaks a writing rule is refused, then put to the person', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Send as it is')
+  stubAutoMerge(on, DATA, LISTED)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const call = { tool: 'mcp__github__gh', command: 'pr-update', args: { pr: 1, body: 'Done; thanks' }, repo: 'acme/other' } as const
+  await $.tool.call(call)
+  expect(asked.length).toBe(0)
+  expect(runs.length).toBe(0)
+  await $.tool.call(call)
+  expect(asked.length).toBe(1)
+  expect(asked[0]).toContain('no semicolon')
+  expect(runs.length).toBe(1)
 })
 
 const SOME_WRITES: [string, any][] = [
