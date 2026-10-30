@@ -63,8 +63,8 @@ async function runGh(
  *
  * Between the verdict and the run come the house rules of engine/WRITING.md:
  * the mechanical ones refuse a text before it leaves the machine, and the
- * approvals the file reserves to the person (an existing description, a pull
- * request out of draft) are asked whatever the settings allow.
+ * approvals the file reserves to the person (a pull request out of draft) are
+ * asked whatever the settings allow.
  *
  * In a repository in auto-merge no write is put to the person: the reserved
  * approvals lift and an ask with no rule behind it runs. A deny and an ask

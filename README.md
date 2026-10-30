@@ -100,11 +100,12 @@ plugin's data directory: `$CLAUDE_PLUGIN_DATA` when the host sets it, else
 Names compare without regard to case. The repository is the call's `repo`,
 else `GH_REPO`, else the checkout's `origin`, the order the engine itself
 follows. There, opening a pull request out of draft, `pr-ready`, a merge
-and every other write run without a question, which ends agents held on a dialog nobody answers in a repository that merges on its own.
-A deny rule still refuses, an ask from an explicit rule still asks, and the
-writing rules still apply. Elsewhere every write is asked as before. An absent file lists
-no repository; an unreadable or malformed one lists none either and says so in
-one transcript line. The plugin never writes the file.
+and every other write run without a question, which ends agents held on a
+dialog nobody answers in a repository that merges on its own. A deny rule
+still refuses, an ask from an explicit rule still asks, and the writing
+rules still apply. Elsewhere every write is asked as before. An absent file
+lists no repository; an unreadable or malformed one lists none either and
+says so in one transcript line. The plugin never writes the file.
 
 ## Tests
 
