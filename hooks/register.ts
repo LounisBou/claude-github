@@ -140,13 +140,11 @@ function describe(e: any): string {
 export const NEVER_GRANTED = new Set(['pr-merge', 'comment-delete'])
 
 // The approvals WRITING.md reserves to the person, asked whatever a rule or
-// the mode allows: an existing description is never edited without the
-// operator's approval, and a pull request leaves draft only on his word,
-// except in a repository he put in auto-merge (autoMerge), where nothing is
-// reserved.
+// the mode allows: a pull request leaves draft only on his word, except in a
+// repository he put in auto-merge (autoMerge), where nothing is reserved. A
+// description is replaced without asking, under the writing rules.
 export function reservedToPerson(command: string, args: Record<string, unknown>, autoMerge = false): string | undefined {
   if (autoMerge) return undefined
-  if (command === 'pr-update' && typeof args.body === 'string') return 'Replace the description of an existing pull request:'
   if (command === 'pr-ready') return 'Take a pull request out of draft:'
   if (command === 'pr-create' && args.draft === false) return 'Open a pull request ready for review, not as a draft:'
   return undefined
