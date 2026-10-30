@@ -54,9 +54,9 @@ it. `/github:doctor` then confirms everything is ready.
   A text that breaks one is refused with the rule, so it can be rewritten. A
   text the user typed in the prompt passes, and the same text sent again is
   put to the user. `pr-create` opens a draft unless the call says otherwise,
-  and leaving draft (`draft: false`, `pr-ready`) or replacing an existing
-  description is always asked, whatever the rules allow. The one exception
-  is a repository in auto-merge (below).
+  and leaving draft (`draft: false`, `pr-ready`) is always asked, whatever
+  the rules allow, except in a repository in auto-merge (below). An existing
+  description is replaced without asking, under the writing rules.
 - **Ready and Not Ready labels** — `pr-readiness <pr> ready|not-ready` puts
   the `Ready` (`27e760`) or `Not Ready` (`8c1455`) label on a pull request and
   takes the other off, and `labels-ensure` creates both on a repository that
@@ -99,9 +99,8 @@ plugin's data directory: `$CLAUDE_PLUGIN_DATA` when the host sets it, else
 
 Names compare without regard to case. The repository is the call's `repo`,
 else `GH_REPO`, else the checkout's `origin`, the order the engine itself
-follows. There, replacing a description, opening a pull request out of draft,
-`pr-ready`, a merge and every other write run without a question, which ends
-agents held on a dialog nobody answers in a repository that merges on its own.
+follows. There, opening a pull request out of draft, `pr-ready`, a merge
+and every other write run without a question, which ends agents held on a dialog nobody answers in a repository that merges on its own.
 A deny rule still refuses, an ask from an explicit rule still asks, and the
 writing rules still apply. Elsewhere every write is asked as before. An absent file lists
 no repository; an unreadable or malformed one lists none either and says so in
