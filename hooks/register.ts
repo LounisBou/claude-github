@@ -6,6 +6,10 @@ import { atom, read, update } from 'claude-code'
 
 import type { GithubPane, GithubPaneRow } from '../types'
 import { lint, refusal, textFields } from './writing.ts'
+import {
+  WRITING_FILE, bashAuthoring, lineCount, normalise, printsWhole, readerKey, readsWhole, toolAuthoring,
+  unreadRefusal,
+} from './guards.ts'
 
 export const PANE_ID = 'github-prs'
 
@@ -76,6 +80,9 @@ async function permit($: any, e: any): Promise<string | undefined> {
   if (verdict.decision === 'deny') return verdict.reason || 'refused by a permission rule'
   const args = e.args ?? {}
 
+  const unread = await writingUnread($, toolAuthoring(e.command, args), e.agentId)
+  if (unread) return unread
+
   const found = lint(e.command, args, lastTyped)
   if (found.length > 0) {
     const print = fingerprint(e)
@@ -127,6 +134,64 @@ async function ask($: any, question: string, options: string[], command: string)
     return 'gh ' + command + ' needs permission and nobody could be asked'
   }
   return 'the user refused gh ' + command
+}
+
+// ---- the guard « WRITING.md read » ----
+
+/*
+ * Every text engine/WRITING.md governs (a commit, a pull request, a comment, a
+ * review) waits until its author read the file whole in the context that
+ * writes it. A whole Read of the loaded version's file marks the reader, the
+ * session and the loop within it, and so do a Bash cat or sed -n '1,$p' of it,
+ * and, in a checkout of this plugin, a Read of the checkout's copy. A
+ * compaction of that loop clears its mark, as the text left its context, and
+ * a reload of the module clears them all: both cost one more Read. A failure
+ * of the guard itself never holds a text back: the writing rules still run.
+ */
+
+// The readers who hold WRITING.md in their context, by readerKey.
+const readers = new Set<string>()
+
+// The repository whose checkout carries the file as its own engine/WRITING.md.
+export const PLUGIN_REPOSITORY = 'lounisbou/claude-github'
+
+function guardFailed($: any, err: any): undefined {
+  $.ui.log('github: the WRITING.md guard failed and let the call through: ' + String(err?.message ?? err))
+  return undefined
+}
+
+// The refusal for an authoring command whose reader has not read the file,
+// or undefined: no authoring, a reader who read it, or a guard failure.
+async function writingUnread($: any, command: string | undefined, agentId?: string): Promise<string | undefined> {
+  if (!command) return undefined
+  try {
+    if (readers.has(readerKey(String(await $.session.id()), agentId))) return undefined
+    return unreadRefusal($.plugin.root, command)
+  } catch (err) {
+    return guardFailed($, err)
+  }
+}
+
+// Whether a path is a WRITING.md this reader may read for the rules: the
+// loaded version's, or the session's checkout's when it is this plugin. Any
+// other file costs one string comparison.
+async function isWritingFile($: any, path: unknown): Promise<boolean> {
+  if (typeof path !== 'string' || !path.endsWith('WRITING.md')) return false
+  const dir = String(await $.session.cwd())
+  const file = normalise(path, dir)
+  if (file === normalise($.plugin.root + WRITING_FILE)) return true
+  if (file !== normalise(dir + WRITING_FILE)) return false
+  const r = await $.process.run(['git', 'remote', 'get-url', 'origin'], { timeoutMs: 10_000 })
+  const match = r.exitCode === 0 ? GITHUB_ORIGIN.exec(String(r.stdout).trim()) : null
+  return match !== null && (match[1] + '/' + match[2]).toLowerCase() === PLUGIN_REPOSITORY
+}
+
+async function markReader($: any, agentId?: string): Promise<void> {
+  readers.add(readerKey(String(await $.session.id()), agentId))
+}
+
+function failed(result: any): boolean {
+  return !result || result.deny !== undefined || result.isError === true
 }
 
 function describe(e: any): string {
@@ -460,6 +525,57 @@ export function register(on: any): void {
   on('prompt.submit', async (_$: any, e: any, next: any) => {
     const kind = String(e.origin?.kind ?? '')
     if (kind === 'composer' || kind === 'bridge') lastTyped = String(e.text ?? '')
+    return next(e)
+  }).catch(async (_$: any, e: any, next: any) => next(e))
+
+  on('tool.call', { tool: 'Bash' }, async ($: any, e: any, next: any) => {
+    let command: string | undefined
+    try {
+      command = bashAuthoring(e.command)
+    } catch (err) {
+      guardFailed($, err)
+      return next(e)
+    }
+    const unread = await writingUnread($, command, e.agentId)
+    if (unread) return { deny: unread }
+    const result = await next(e)
+    try {
+      const printed = printsWhole(e.command)
+      if (printed && !failed(result) && await isWritingFile($, printed)) {
+        await markReader($, e.agentId)
+      }
+    } catch (err) {
+      guardFailed($, err)
+    }
+    return result
+  }).catch(async (_$: any, e: any, next: any) => next(e))
+
+  on('tool.call', { tool: 'Read' }, async ($: any, e: any, next: any) => {
+    const result = await next(e)
+    try {
+      if (!failed(result) && !result.result?.file?.truncatedByTokenCap
+        && await isWritingFile($, e.file_path)) {
+        // The file's length as the Read counted it, else read from the file,
+        // and only when a limit makes it matter.
+        let total = result.result?.file?.totalLines
+        if (typeof total !== 'number' && e.limit !== undefined && e.limit !== null) {
+          total = lineCount(String(await $.fs.read(normalise(e.file_path))))
+        }
+        if (readsWhole(e.offset, e.limit, () => Number(total))) await markReader($, e.agentId)
+      }
+    } catch (err) {
+      guardFailed($, err)
+    }
+    return result
+  }).catch(async (_$: any, e: any, next: any) => next(e))
+
+  // Cleared as the compaction starts: one that is vetoed costs one more Read.
+  on('session.compact', async ($: any, e: any, next: any) => {
+    try {
+      readers.delete(readerKey(String(await $.session.id()), e.agentId))
+    } catch (err) {
+      guardFailed($, err)
+    }
     return next(e)
   }).catch(async (_$: any, e: any, next: any) => next(e))
 
