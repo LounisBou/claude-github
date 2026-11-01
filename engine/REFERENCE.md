@@ -54,6 +54,8 @@ or a review comment, read `WRITING.md` beside this file.
 
 `pr-merge --sha <full sha>` sends the head that was verified, and GitHub refuses the merge
 if the head has moved since.
+`--match-head-commit` takes the full sha read by `git rev-parse` or `headRefOid`, never
+copied from a short form or completed by hand.
 
 A PR that GitHub counts as part of a stack refuses the synchronous merge with a 403, so
 `pr-merge` then uses the asynchronous merge endpoint with the same method (and the same sha
@@ -202,6 +204,15 @@ python3 "$GH" image-upload before.png after.png --title "Before" --title "After"
 call is refused as a usage error.
 
 Requires push access to the repository.
+
+## Pushing from the sandbox
+
+Outgoing SSH is blocked in the sandbox, even through `!`. Push over HTTPS with gh's
+token and an empty `credential.helper=` first, to avoid the keychain dialogs:
+`git -c credential.helper= -c credential.helper='!f(){ echo username=x-access-token; echo "password=$(gh auth token)"; }; f' push https://github.com/<owner>/<repo>.git HEAD:<branch>`.
+A push by URL does not update `refs/remotes/origin/*`: `--force-with-lease` takes an
+explicit sha (`--force-with-lease=<branch>:<full sha>`). Same pattern for `fetch`.
+Never « external terminal ».
 
 ## Exit codes
 

@@ -206,8 +206,9 @@ export const NEVER_GRANTED = new Set(['pr-merge', 'comment-delete'])
 
 // The approvals WRITING.md reserves to the person, asked whatever a rule or
 // the mode allows: a pull request leaves draft only on his word, except in a
-// repository he put in auto-merge (autoMerge), where nothing is reserved. A
-// description is replaced without asking, under the writing rules.
+// repository he put in auto-merge (autoMerge), where nothing is reserved. The
+// description of his own draft is published and edited without asking, under
+// the writing rules.
 export function reservedToPerson(command: string, args: Record<string, unknown>, autoMerge = false): string | undefined {
   if (autoMerge) return undefined
   if (command === 'pr-ready') return 'Take a pull request out of draft:'
