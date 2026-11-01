@@ -45,6 +45,11 @@ test('a command name another plugin owns passes through to next', async ($, on) 
   expect(runs.length).toBe(0)
 })
 
+// A session id no other test uses: the marks and the grants the module keeps
+// by session never carry from one test to the next.
+let sessions = 0
+const freshSession = () => 'session-' + ++sessions
+
 // reply: a fixed { exitCode, stdout, stderr } value, or a function (e) => value
 // for sequenced replies. Registered once per test — never register a second
 // process.run stub afterwards; pass a function instead.
@@ -55,8 +60,9 @@ async function stubMod(
   reply: any = { exitCode: 0, stdout: 'ok', stderr: '' },
   verdict: any = { decision: 'allow' },
 ) {
+  const session = freshSession()
   on('session.start', () => ({ cwd: '/work' }))
-  on('session.id', () => ({ value: 'session-1' }))
+  on('session.id', () => ({ value: session }))
   on('session.cwd', () => ({ value: '/work' }))
   stubRead(on)
   // The dialog a $.ui.ask raises and the Read of WRITING.md are themselves
@@ -1343,8 +1349,9 @@ test('an explicit ask rule is never answered by a grant', async ($, on) => {
 test('a grant never passes a text that breaks a rule, nor a deny verdict', async ($, on) => {
   const runs: any[] = []
   let verdict: any = { decision: 'ask' }
+  const session = freshSession()
   on('session.start', () => ({ cwd: '/work' }))
-  on('session.id', () => ({ value: 'session-1' }))
+  on('session.id', () => ({ value: session }))
   on('session.cwd', () => ({ value: '/work' }))
   on('tool.check', (_$: any, e: any) => (e.tool === 'AskUserQuestion' || e.tool === 'Read' ? { decision: 'allow' } : verdict))
   stubRead(on)
@@ -1387,7 +1394,7 @@ test('a grant is not given when the person picks plain Allow, nor by text typed 
 test('a grant on the origin repository holds for its directory and its session only', async ($, on) => {
   const runs: any[] = []
   const asked: string[] = []
-  let session = 'session-1'
+  let session = freshSession()
   let cwd = '/work'
   on('session.start', () => ({ cwd: '/work' }))
   on('session.id', () => ({ value: session }))
@@ -1413,7 +1420,7 @@ test('a grant on the origin repository holds for its directory and its session o
   cwd = '/elsewhere'
   await reply()
   cwd = '/work'
-  session = 'session-2'
+  session = freshSession()
   await $.tool.call({ tool: 'Read', file_path: ROOT + '/engine/WRITING.md' })
   await reply()
   expect(asked.length).toBe(3)
@@ -1745,6 +1752,7 @@ test('the tool\'s pr-update without text passes unread, with a body it is refuse
 
 test('a deny verdict on the tool still answers before the guard', async ($, on) => {
   const runs: any[] = []
+  // A session of its own that has read nothing: the guard, run first, would refuse.
   await stubMod(on, runs, [], undefined, { decision: 'deny', reason: 'denied by mcp__github__gh', rule: 'mcp__github__gh' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
 
