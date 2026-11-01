@@ -1770,6 +1770,26 @@ test('the tool\'s pr-update without text passes unread, with a body it is refuse
   expect(runs.length).toBe(1)
 })
 
+test('every other authoring subcommand of the tool is refused unread when it carries text', async ($, on) => {
+  const runs: any[] = []
+  await stubGuard($, on, runs, [])
+
+  const calls: [string, Record<string, unknown>][] = [
+    ['pr-create', { title: 'feat: x', body: 'Text' }],
+    ['pr-comment', { pr: 1, body: 'Text' }],
+    ['thread-reply', { thread: 'T1', body: 'Text' }],
+    ['comment-edit', { id: 1, body: 'Text' }],
+    ['review-submit', { pr: 1, event: 'COMMENT', body: 'Text' }],
+    ['review-pending-create', { pr: 1, comments: [{ path: 'a.ts', line: 1, body: 'Text' }] }],
+    ['review-pending-add', { review: 'R1', path: 'a.ts', line: 1, body: 'Text' }],
+  ]
+  for (const [command, args] of calls) {
+    const out: any = await $.tool.call({ tool: 'mcp__github__gh', command, args })
+    expect(JSON.stringify(out), command).toContain('github: read ' + writingFile() + ' with the Read tool, whole, before ' + command + ':')
+  }
+  expect(runs.length).toBe(0)
+})
+
 test('a deny verdict on the tool still answers before the guard', async ($, on) => {
   const runs: any[] = []
   // A session of its own that has read nothing: the guard, run first, would refuse.
@@ -1877,6 +1897,21 @@ test('a Read whose marking fails lets the next authoring through, with a log lin
   expect(bash).toEqual(['git commit -m x'])
   expect(logs.length).toBe(2)
   expect(logs[1]).toContain('github: the WRITING.md guard failed and let the call through')
+})
+
+test('a Read with a limit and no length counts the file: short of its lines it does not mark, up to them it does', async ($, on) => {
+  const bash: string[] = []
+  const session = freshSession()
+  await stubBare($, on, bash, [], () => session, 'one\ntwo\nthree\nfour\nfive\n')
+
+  await $.tool.call({ tool: 'Read', file_path: writingFile(), limit: 4 })
+  const out: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m x' })
+  expect(JSON.stringify(out)).toContain('before git commit:')
+
+  await $.tool.call({ tool: 'Read', file_path: writingFile(), limit: 5 })
+  const now: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m x' })
+  expect(now.deny).toBeUndefined()
+  expect(bash).toEqual(['git commit -m x'])
 })
 
 for (const read of ['cat ', 'sed -n \'1,$p\' ']) {
