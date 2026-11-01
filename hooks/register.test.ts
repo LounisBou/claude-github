@@ -1798,6 +1798,52 @@ test('an unreadable session id lets the command through, with one log line', asy
   expect(logs.length).toBe(1)
 })
 
+// A session stubbed by hand where stubGuard's fixed answers would not do: its
+// id is what id() answers, its Read reports no length, as when the tool does
+// not count the file, and $.fs.read gives text, or refuses when text is null.
+async function stubBare($: any, on: any, bash: string[], logs: string[], id: () => unknown, text: string | null = null) {
+  on('session.start', () => ({ cwd: '/work' }))
+  on('session.id', () => ({ value: id() }))
+  on('session.cwd', () => ({ value: '/work' }))
+  on('tool.register', () => ({ value: undefined }))
+  on('command.register', () => ({ value: undefined }))
+  on('tool.call', { tool: 'Read' }, (_$: any, e: any) =>
+    ({ result: { type: 'text', file: { filePath: e.file_path, content: '', numLines: 1, startLine: 1 } } }))
+  on('fs.read', (_$: any, e: any) => (text === null ? { deny: 'EIO ' + e.path } : { value: text }))
+  on('tool.call', { tool: 'Bash' }, (_$: any, e: any) => {
+    bash.push(e.command)
+    return { result: { stdout: '', stderr: '', interrupted: false } }
+  })
+  on('ui.log', (_$: any, e: any) => {
+    logs.push(e.text)
+    return { value: undefined }
+  })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+}
+
+test('a session with no id authors with one log line, and what it reads marks no reader', async ($, on) => {
+  const bash: string[] = []
+  const logs: string[] = []
+  let id: unknown
+  await stubBare($, on, bash, logs, () => id)
+
+  const out: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m x' })
+  expect(out.deny).toBeUndefined()
+  expect(logs.length).toBe(1)
+  expect(logs[0]).toContain('github: the WRITING.md guard failed and let the call through')
+
+  // Another session with no id passes on the guard's failure again, not on the
+  // first one's Read, and a session whose id is the text "undefined" read nothing.
+  await $.tool.call({ tool: 'Read', file_path: writingFile() })
+  const other: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m y' })
+  expect(other.deny).toBeUndefined()
+  expect(logs.length).toBe(3)
+  id = 'undefined'
+  const named: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m z' })
+  expect(JSON.stringify(named)).toContain('before git commit:')
+  expect(bash).toEqual(['git commit -m x', 'git commit -m y'])
+})
+
 for (const read of ['cat ', 'sed -n \'1,$p\' ']) {
   test('a Bash ' + read.trim() + ' of the file marks the reader', async ($, on) => {
     const bash: string[] = []

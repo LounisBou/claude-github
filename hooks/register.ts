@@ -160,12 +160,20 @@ function guardFailed($: any, err: any): undefined {
   return undefined
 }
 
+// The session's id, or a throw: an absent or empty one would make every
+// session without one the same reader.
+async function sessionId($: any): Promise<string> {
+  const id = await $.session.id()
+  if (typeof id !== 'string' || id === '') throw new Error('the session id is unreadable: ' + String(id))
+  return id
+}
+
 // The refusal for an authoring command whose reader has not read the file,
 // or undefined: no authoring, a reader who read it, or a guard failure.
 async function writingUnread($: any, command: string | undefined, agentId?: string): Promise<string | undefined> {
   if (!command) return undefined
   try {
-    if (readers.has(readerKey(String(await $.session.id()), agentId))) return undefined
+    if (readers.has(readerKey(await sessionId($), agentId))) return undefined
     return unreadRefusal($.plugin.root, command)
   } catch (err) {
     return guardFailed($, err)
@@ -187,7 +195,7 @@ async function isWritingFile($: any, path: unknown): Promise<boolean> {
 }
 
 async function markReader($: any, agentId?: string): Promise<void> {
-  readers.add(readerKey(String(await $.session.id()), agentId))
+  readers.add(readerKey(await sessionId($), agentId))
 }
 
 function failed(result: any): boolean {
@@ -573,7 +581,7 @@ export function register(on: any): void {
   // Cleared as the compaction starts: one that is vetoed costs one more Read.
   on('session.compact', async ($: any, e: any, next: any) => {
     try {
-      readers.delete(readerKey(String(await $.session.id()), e.agentId))
+      readers.delete(readerKey(await sessionId($), e.agentId))
     } catch (err) {
       guardFailed($, err)
     }
