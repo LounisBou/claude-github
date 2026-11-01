@@ -152,3 +152,12 @@ test('the argument of bash -c, sh -c and zsh -c is read again, one level deep', 
   expect(simpleCommands('git -c x=y commit')).toEqual([['git', '-c', 'x=y', 'commit']])
   expect(simpleCommands('bash script.sh -c "git commit"')).toEqual([['bash', 'script.sh', '-c', 'git commit']])
 })
+
+test('the option a shell\'s -o or -O sets is no command line, the -c argument after it is', () => {
+  expect(simpleCommands('bash -o pipefail -c \'git commit -m x\'')).toEqual([
+    ['bash', '-o', 'pipefail', '-c', 'git commit -m x'],
+    ['git', 'commit', '-m', 'x'],
+  ])
+  expect(simpleCommands('bash -O extglob -c "gh pr create"')).toContainEqual(['gh', 'pr', 'create'])
+  expect(simpleCommands('bash -euo pipefail -c "git commit -m x"')).toContainEqual(['git', 'commit', '-m', 'x'])
+})

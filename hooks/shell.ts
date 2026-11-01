@@ -45,7 +45,8 @@ export function simpleCommands(line: string): string[][] {
 }
 
 // The command line a shell runs with -c (alone or in a cluster such as -lc):
-// the first word after its options.
+// the first word after its options, the option each -o or -O sets skipped
+// (`bash -o pipefail -c …`, `bash -euo pipefail -c …`).
 function shellArgument(argv: string[]): string | undefined {
   if (!SHELL.test(argv[0] ?? '')) return undefined
   let dashC = false
@@ -53,6 +54,7 @@ function shellArgument(argv: string[]): string | undefined {
     const word = argv[k]
     if (/^-[A-Za-z]+$/.test(word)) {
       if (word.includes('c')) dashC = true
+      k += word.replace(/[^oO]/g, '').length
       continue
     }
     if (word.startsWith('-')) continue
