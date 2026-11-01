@@ -149,8 +149,10 @@ async function ask($: any, question: string, options: string[], command: string)
  * of the guard itself never holds a text back: the writing rules still run.
  */
 
-// The readers who hold WRITING.md in their context, by readerKey.
-const readers = new Set<string>()
+// The readers who hold WRITING.md in their context, by readerKey, and those
+// whose read of it could not be marked: a failure of the guard, which lets
+// their texts through rather than hold them back for ever.
+const readers = new Map<string, 'read' | 'marking failed'>()
 
 // The repository whose checkout carries the file as its own engine/WRITING.md.
 export const PLUGIN_REPOSITORY = 'lounisbou/claude-github'
@@ -173,7 +175,9 @@ async function sessionId($: any): Promise<string> {
 async function writingUnread($: any, command: string | undefined, agentId?: string): Promise<string | undefined> {
   if (!command) return undefined
   try {
-    if (readers.has(readerKey(await sessionId($), agentId))) return undefined
+    const state = readers.get(readerKey(await sessionId($), agentId))
+    if (state === 'read') return undefined
+    if (state === 'marking failed') return guardFailed($, 'a read of WRITING.md could not be marked')
     return unreadRefusal($.plugin.root, command)
   } catch (err) {
     return guardFailed($, err)
@@ -195,7 +199,19 @@ async function isWritingFile($: any, path: unknown): Promise<boolean> {
 }
 
 async function markReader($: any, agentId?: string): Promise<void> {
-  readers.add(readerKey(await sessionId($), agentId))
+  readers.set(readerKey(await sessionId($), agentId), 'read')
+}
+
+// A read of the file that could not be marked: logged, and its reader let
+// through until a compaction, unless an earlier read marked it.
+async function markFailed($: any, err: any, agentId?: string): Promise<void> {
+  guardFailed($, err)
+  try {
+    const key = readerKey(await sessionId($), agentId)
+    if (readers.get(key) !== 'read') readers.set(key, 'marking failed')
+  } catch {
+    // No reader to name: writingUnread fails on the same session id and lets the call through.
+  }
 }
 
 function failed(result: any): boolean {
@@ -554,7 +570,7 @@ export function register(on: any): void {
         await markReader($, e.agentId)
       }
     } catch (err) {
-      guardFailed($, err)
+      await markFailed($, err, e.agentId)
     }
     return result
   }).catch(async (_$: any, e: any, next: any) => next(e))
@@ -573,7 +589,7 @@ export function register(on: any): void {
         if (readsWhole(e.offset, e.limit, () => Number(total))) await markReader($, e.agentId)
       }
     } catch (err) {
-      guardFailed($, err)
+      await markFailed($, err, e.agentId)
     }
     return result
   }).catch(async (_$: any, e: any, next: any) => next(e))

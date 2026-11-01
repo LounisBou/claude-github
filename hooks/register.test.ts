@@ -1844,6 +1844,21 @@ test('a session with no id authors with one log line, and what it reads marks no
   expect(bash).toEqual(['git commit -m x', 'git commit -m y'])
 })
 
+test('a Read whose marking fails lets the next authoring through, with a log line', async ($, on) => {
+  const bash: string[] = []
+  const logs: string[] = []
+  const session = freshSession()
+  await stubBare($, on, bash, logs, () => session, null)
+
+  await $.tool.call({ tool: 'Read', file_path: writingFile(), limit: 2000 })
+  expect(logs.length).toBe(1)
+  const out: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m x' })
+  expect(out.deny).toBeUndefined()
+  expect(bash).toEqual(['git commit -m x'])
+  expect(logs.length).toBe(2)
+  expect(logs[1]).toContain('github: the WRITING.md guard failed and let the call through')
+})
+
 for (const read of ['cat ', 'sed -n \'1,$p\' ']) {
   test('a Bash ' + read.trim() + ' of the file marks the reader', async ($, on) => {
     const bash: string[] = []
