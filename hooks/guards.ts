@@ -19,17 +19,30 @@ function setsOne(word: string, flags: string[]): boolean {
     || (flag.startsWith('--') ? word.startsWith(flag + '=') : word.startsWith(flag) && word.length > 2))
 }
 
+// The noun and the verb of a gh command, past its repository option wherever
+// it stands before the verb (`gh -R o/r pr create`, `gh pr --repo=o/r create`),
+// and the words after the verb.
+function ghWords(argv: string[]): { noun: string; verb: string; flags: string[] } | undefined {
+  const named: string[] = []
+  let k = 1
+  while (k < argv.length && named.length < 2) {
+    const word = argv[k++]
+    if (word === '-R' || word === '--repo') k++
+    else if (!word.startsWith('-R') && !word.startsWith('--repo=')) named.push(word)
+  }
+  return named.length === 2 ? { noun: named[0], verb: named[1], flags: argv.slice(k) } : undefined
+}
+
 // The authoring command one simple command runs, as the refusal names it, or
 // undefined when it writes no text WRITING.md governs.
 export function authoringCommand(argv: string[]): string | undefined {
   const git = gitSubcommand(argv)
   if (git && argv[git.at] === 'commit') return 'git commit'
-  if (argv.length < 3 || !/^(.*\/)?gh$/.test(argv[0])) return undefined
-  const [noun, verb] = [argv[1], argv[2]]
-  if (noun !== 'pr' && noun !== 'issue') return undefined
+  const gh = /^(.*\/)?gh$/.test(argv[0] ?? '') ? ghWords(argv) : undefined
+  if (!gh || (gh.noun !== 'pr' && gh.noun !== 'issue')) return undefined
+  const { noun, verb, flags } = gh
   const name = 'gh ' + noun + ' ' + verb
   if (verb === 'create' || verb === 'comment') return name
-  const flags = argv.slice(3)
   if (noun === 'pr' && verb === 'review' && flags.some((w) => setsOne(w, REVIEW_TEXT))) return name
   if (verb === 'edit' && flags.some((w) => setsOne(w, EDIT_TEXT))) return name
   return undefined

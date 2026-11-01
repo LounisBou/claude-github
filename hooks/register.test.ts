@@ -1654,6 +1654,26 @@ test('every authoring gh command is refused unread', async ($, on) => {
   expect(bash).toEqual([])
 })
 
+test('gh\'s repository option before the noun or the verb is read through', async ($, on) => {
+  const bash: string[] = []
+  await stubGuard($, on, [], bash)
+
+  const cases: [string, string][] = [
+    ['gh -R o/r pr create', 'gh pr create'],
+    ['gh --repo o/r pr comment 3 -b x', 'gh pr comment'],
+    ['gh pr -R o/r create', 'gh pr create'],
+    ['gh --repo=o/r issue edit 3 -t t', 'gh issue edit'],
+  ]
+  for (const [command, named] of cases) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(JSON.stringify(out), command).toContain('before ' + named + ':')
+  }
+  // Its value is no verb, and the flags read are those after the verb.
+  const view: any = await $.tool.call({ tool: 'Bash', command: 'gh -R o/r pr view 3' })
+  expect(view.deny).toBeUndefined()
+  expect(bash).toEqual(['gh -R o/r pr view 3'])
+})
+
 test('a command that only mentions an authoring one passes unread', async ($, on) => {
   const bash: string[] = []
   await stubGuard($, on, [], bash)
