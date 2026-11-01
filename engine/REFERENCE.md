@@ -214,6 +214,22 @@ A push by URL does not update `refs/remotes/origin/*`: `--force-with-lease` take
 explicit sha (`--force-with-lease=<branch>:<full sha>`). Same pattern for `fetch`.
 Never « external terminal ».
 
+## Guards
+
+**WRITING.md read.** A commit (`git commit`), a pull request or an issue opened, edited
+with a title or a body, or commented (`gh pr create`, `gh issue create`, `gh pr
+comment`, `gh issue comment`, `gh pr review` with a body, `gh pr edit` and `gh issue
+edit` with a title or a body), and every call of this tool that carries a text, waits
+until `WRITING.md` beside this file was read whole in the context that writes it: the
+Read tool from its first line to its last, or a Bash `cat` or `sed -n '1,$p'` of it.
+Each subagent reads for itself, and a compaction asks for one more read. The command
+is read word by word, so a message or a body that only mentions one of these commands
+passes. Until then the call is refused with:
+
+```
+github: read <root>/engine/WRITING.md with the Read tool, whole, before <command>: its rules (commit convention, references, PR titles and descriptions, comments) apply to this text. Then run the same command again.
+```
+
 ## Exit codes
 
 | Code | Meaning |
