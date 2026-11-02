@@ -887,7 +887,7 @@ test('a pr-ready on a repository not in auto-merge is asked', async ($, on) => {
   expect(asked.length).toBe(1)
   expect(asked[0]).toContain('out of draft')
   expect(JSON.stringify(out)).toContain('refused gh pr-ready')
-  expect(runs.length).toBe(0)
+  expect(acts(runs).length).toBe(0)
 })
 
 test('with no auto-merge file a pr-ready is asked, and nothing is logged', async ($, on) => {
@@ -901,7 +901,7 @@ test('with no auto-merge file a pr-ready is asked, and nothing is logged', async
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
   expect(asked.length).toBe(1)
-  expect(runs.length).toBe(0)
+  expect(acts(runs).length).toBe(0)
   expect(logs).toEqual([])
 })
 
@@ -917,7 +917,7 @@ for (const [what, text] of [['unreadable', null], ['without a list', '{"reposito
 
     await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
     expect(asked.length).toBe(1)
-    expect(runs.length).toBe(0)
+    expect(acts(runs).length).toBe(0)
     expect(logs.length).toBe(1)
     expect(logs[0]).toContain('/data/github/auto-merge.json')
   })
@@ -953,7 +953,7 @@ test('a pull request opened out of draft on a repository not in auto-merge is st
   expect(asked.length).toBe(2)
   expect(asked[0]).toContain('not as a draft')
   expect(asked[1]).toContain('out of draft')
-  expect(runs.length).toBe(1)
+  expect(acts(runs).length).toBe(1)
 })
 
 test('a description replaced is refused under a deny rule', async ($, on) => {
@@ -1151,7 +1151,7 @@ test('GH_REPO names the repository before the origin, as it does for the engine'
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
   expect(asked.length).toBe(1)
-  expect(runs.length).toBe(0)
+  expect(acts(runs).length).toBe(0)
 })
 
 test('a repo in the call names the repository before one in its args', async ($, on) => {
@@ -1182,7 +1182,7 @@ test('an empty repo in the call hides the one in its args, as the engine\'s last
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1, repo: 'acme/thing' }, repo: '' })
   expect(asked.length).toBe(1)
-  expect(runs.map((r) => r.argv[0])).toEqual(['git'])
+  expect(acts(runs).map((r) => r.argv[0])).toEqual(['git'])
 })
 
 test('a repo in the args alone names the repository', async ($, on) => {
@@ -1259,7 +1259,7 @@ test('an auto-merge list that is not made of strings asks, with one log line', a
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
   expect(asked.length).toBe(1)
-  expect(runs.length).toBe(0)
+  expect(acts(runs).length).toBe(0)
   expect(logs.length).toBe(1)
   expect(logs[0]).toContain('/data/github/auto-merge.json')
 })

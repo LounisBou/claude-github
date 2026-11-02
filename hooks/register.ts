@@ -81,7 +81,7 @@ async function runGh(
  * from an explicit rule stand, and so do the mechanical writing rules.
  */
 async function permit(
-  $: any, e: any, beforeAsk?: () => Promise<string | undefined>,
+  $: any, e: any, beforeAsk?: () => Promise<string | undefined>, ciUndraft?: () => Promise<boolean>,
 ): Promise<string | undefined> {
   const input = { command: e.command, args: e.args, repo: e.repo }
   const verdict = await $.tool.check({ tool: TOOL, input })
@@ -95,6 +95,13 @@ async function permit(
   // request that is not ready.
   const notReady = beforeAsk ? await beforeAsk() : undefined
   if (notReady) return notReady
+
+  // Leaving draft for CI, still Not Ready, is no approval to give: it runs in
+  // every repository, as through Bash. An ask from an explicit rule stands.
+  if (ciUndraft && await ciUndraft()) {
+    if (verdict.decision === 'allow' || !verdict.rule) return undefined
+    return ask($, describe(e) + '?', ['Allow', 'Deny'], e.command)
+  }
 
   const found = lint(e.command, args, lastTyped)
   if (found.length > 0) {
@@ -725,6 +732,12 @@ function toolReady($: any, e: any, act: Act) {
       if (found.r.error) return unverifiedRefusal(found.repo, found.pr, found.r.error)
       return refuseNotReady($, act, found.repo, Number(found.pr), found.r)
     },
+    // Whether this is an undraft for CI, read in both phases.
+    async ciUndraft(): Promise<boolean> {
+      if (act.kind !== 'undraft') return false
+      await evaluate()
+      return forCi
+    },
     async goingAhead(): Promise<void> {
       if (await phaseOf($) !== 'warn') return
       if (act.kind === 'create') {
@@ -1151,7 +1164,7 @@ export function register(on: any): void {
     const e = { ...raw, args: withHouseDefaults(raw.command, raw.args ?? {}) }
     const act = toolAct(e.command, e.args)
     const ready = act ? toolReady($, e, act) : undefined
-    const refused = await permit($, e, ready?.beforeAsk)
+    const refused = await permit($, e, ready?.beforeAsk, ready?.ciUndraft)
     if (refused) return { deny: refused }
     if (ready) await ready.goingAhead()
     try {

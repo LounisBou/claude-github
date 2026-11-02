@@ -175,10 +175,11 @@ test('warn: a pr-ready that is not ready, outside auto-merge, is asked as before
   expect(line.session).toContain('guard-session-')
 })
 
-test('warn: refused by the person, nothing is read and nothing is logged', async ($, on) => {
+test('warn: refused by the person, the gate is read once, nothing runs and nothing is logged', async ($, on) => {
   const seen = await world($, on, { ...NO_RECORDS, answer: 'Deny' })
   await $.tool.call(gh('pr-ready', { pr: 12 }))
-  expect(gates(seen)).toBe(0)
+  expect(gates(seen)).toBe(1)
+  expect(commands(seen)).toEqual(['pr-gate'])
   expect(seen.logs).toEqual([])
 })
 
@@ -323,6 +324,27 @@ for (const phase of ['warn', 'enforce'] as const) {
       expect(out).toEqual({ result: 'ok' })
       expect(seen.runs.find((r) => r.command === 'pr-ready')?.args).toEqual({ pr: 12, 'for-ci': true })
       expect(seen.logs).toEqual(['github: acme/thing#12 out of draft to run CI, still Not Ready'])
+    })
+  })
+
+  test(phase + ': a CI undraft through the tool passes outside auto-merge too, with no question', async ($, on) => {
+    await inPhase(phase, async () => {
+      const seen = await world($, on, { ...NO_RECORDS, verdict: { decision: 'ask' }, answer: 'Deny', ci: { result: 'PENDING', skipped: ['test'] } })
+      const out: any = await $.tool.call(gh('pr-ready', { pr: 12 }))
+      expect(out).toEqual({ result: 'ok' })
+      expect(seen.asked).toEqual([])
+      expect(seen.runs.find((r) => r.command === 'pr-ready')?.args).toEqual({ pr: 12, 'for-ci': true })
+      expect(seen.logs).toEqual(['github: acme/thing#12 out of draft to run CI, still Not Ready'])
+    })
+  })
+
+  test(phase + ': an undraft outside auto-merge that is no CI undraft is still asked', async ($, on) => {
+    await inPhase(phase, async () => {
+      const seen = await world($, on, { answer: 'Deny' })
+      const out: any = await $.tool.call(gh('pr-ready', { pr: 12 }))
+      expect(out.deny).toBeDefined()
+      expect(seen.asked).toHaveLength(1)
+      expect(commands(seen)).toEqual(['pr-gate'])
     })
   })
 
