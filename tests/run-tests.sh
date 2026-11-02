@@ -1158,7 +1158,7 @@ print(" | ".join(found))
 PYHEAD
 )
 check "WRITING.md headings are in order" \
-  "Commit messages | Pull request titles | References to pull requests and issues | Pull request descriptions | Security update pull requests | Review comments" \
+  "Commit messages | Pull request titles | References to pull requests and issues | Pull request descriptions | Ready pull requests | Security update pull requests | Review comments" \
   "$headings"
 
 check "REFERENCE.md points at WRITING.md" "1" \
@@ -1167,6 +1167,11 @@ check "REFERENCE.md points at WRITING.md" "1" \
 for needle in '--draft' '**TODO Staging:**' '**TODO Prod:**' '**PRs Dependency:**' '**Related PRs:**' 'TODO Staging or TODO Prod item is a task-list checkbox' 'A TODO item stands alone' '"do the same edit"' 'the value before and after' 'checkbox, one action' 'never joined by "then" or "and run"' 'follow-up' 'mandatory' 'kept apart' 'no semicolon' 'published and edited without asking' 'heading' '| Advisory |' 'locked at' 'one table per advisory' 'is a markdown link to its advisory'; do
   check "WRITING.md mentions '$needle'" "1" \
     "$(grep -qF -- "$needle" "$WRITINGDOC" && echo 1 || echo 0)"
+done
+
+for needle in 'leaves draft only once it is ready (see « Ready' 'A pull request is ready when four things hold at its current head commit' 'Ready belongs to one head' 'A push to the pull request'"'"'s branch puts `Not Ready` back' 'see REFERENCE.md « Records »' 'When the CI does not run on a draft, the pull request leaves draft for it,' 'goes back to draft once the CI is green, then takes `Ready`' 'CI is read from GitHub'; do
+  check "WRITING.md Ready pull requests mentions '$needle'" "1" \
+    "$(python3 -c 'import sys; print(1 if sys.argv[1] in open(sys.argv[2], encoding="utf-8").read() else 0)' "$needle" "$WRITINGDOC")"
 done
 
 titles_concise=$(python3 - "$WRITINGDOC" <<'PYTITLES'

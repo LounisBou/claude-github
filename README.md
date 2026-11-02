@@ -119,7 +119,7 @@ compaction asks for one more read. Commands are read word by word, so a message
 that only mentions one passes. Until then the call is refused with:
 
 ```
-github: read <root>/engine/WRITING.md with the Read tool, whole, before <command>: its rules (commit convention, references, PR titles and descriptions, comments) apply to this text. Then run the same command again.
+github: read <root>/engine/WRITING.md with the Read tool, whole, before <command>: its rules (commit convention, references, PR titles and descriptions, comments, ready pull requests) apply to this text. Then run the same command again.
 ```
 
 A failure of the guard itself lets the call through with one transcript line,

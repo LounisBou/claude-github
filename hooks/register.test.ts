@@ -1623,6 +1623,15 @@ test('a fresh session\'s git commit is refused with the path, and passes once WR
   expect(bash).toEqual(['git commit -m "fix: x"'])
 })
 
+test('the refusal names every rule WRITING.md holds, ready pull requests included', async ($, on) => {
+  await stubGuard($, on, [], [])
+
+  const out: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m "fix: x"' })
+  expect(out.deny).toBe('github: read ' + writingFile() + ' with the Read tool, whole, before git commit: its rules'
+    + ' (commit convention, references, PR titles and descriptions, comments, ready pull requests)'
+    + ' apply to this text. Then run the same command again.')
+})
+
 test('git\'s global options and a wrapper before git commit are read through', async ($, on) => {
   const bash: string[] = []
   await stubGuard($, on, [], bash)

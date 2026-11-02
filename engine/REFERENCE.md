@@ -227,7 +227,7 @@ is read word by word, so a message or a body that only mentions one of these com
 passes. Until then the call is refused with:
 
 ```
-github: read <root>/engine/WRITING.md with the Read tool, whole, before <command>: its rules (commit convention, references, PR titles and descriptions, comments) apply to this text. Then run the same command again.
+github: read <root>/engine/WRITING.md with the Read tool, whole, before <command>: its rules (commit convention, references, PR titles and descriptions, comments, ready pull requests) apply to this text. Then run the same command again.
 ```
 
 ## Exit codes
