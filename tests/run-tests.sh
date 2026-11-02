@@ -1819,6 +1819,81 @@ check "stdin json maps pr-readiness positionals by name" \
 check "stdin json accepts labels-ensure with no positional" \
   "labels-ensure" "$(argv6 '{"command":"labels-ensure"}')"
 
+echo "== records =="
+
+RECORD="$ROOT/engine/record.py"
+HEAD40=0123456789abcdef0123456789abcdef01234567
+rec() { env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$WORK/cfgrec" python3 "$RECORD" "$@"; }
+recbase() { rec --repo Acme/Thing --pr 12 --head "$HEAD40" --producer pr-review "$@"; }
+
+rm -rf "$WORK/cfgrec"
+path=$(recbase --kind review --result pass --detail "clean at pass 3")
+check "record.py exits 0 on a valid record" "0" "$?"
+check "record.py writes under the lowercased repository and the full head" \
+  "$WORK/cfgrec/pr-records/acme/thing/$HEAD40/" "$(dirname "$path")/"
+check "record.py names the file kind.at.producer.json" "1" \
+  "$(basename "$path" | grep -cE '^review\.[0-9]{8}T[0-9]{6}Z\.pr-review\.json$')"
+check "record.py prints the path of a file that exists" "yes" "$([ -f "$path" ] && echo yes || echo no)"
+check "record.py writes the contract's fields" \
+  "v=1 repo=acme/thing pr=12 head=$HEAD40 kind=review result=pass producer=pr-review detail=clean at pass 3 session=" \
+  "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(" ".join("%s=%s" % (k, d[k]) for k in ("v","repo","pr","head","kind","result","producer","detail","session")))' "$path")"
+check "record.py stamps at in UTC, matching the file name" "1" \
+  "$(python3 -c 'import json,sys,os; d=json.load(open(sys.argv[1])); n=os.path.basename(sys.argv[1]).split(".")[1]; print(1 if d["at"].replace("-","").replace(":","") == n else 0)' "$path")"
+check "record.py leaves no temporary file behind" "1" \
+  "$(ls -A "$(dirname "$path")" | wc -l | tr -d ' ')"
+check "record.py writes one JSON object, nothing else" "1" \
+  "$(python3 -c 'import json,sys; print(1 if isinstance(json.load(open(sys.argv[1])), dict) else 0)' "$path")"
+
+path=$(env CLAUDE_CODE_SESSION_ID=s-42 CLAUDE_CONFIG_DIR="$WORK/cfgrec" python3 "$RECORD" --repo acme/thing --pr 12 --head "$HEAD40" --kind norms --result fail --producer norms)
+check "record.py takes the session from CLAUDE_CODE_SESSION_ID" "s-42" \
+  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session"])' "$path")"
+path=$(recbase --kind e2e --result pass --session given)
+check "record.py takes --session over the environment" "given" \
+  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session"])' "$path")"
+check "record.py writes an empty detail when none is given" "" \
+  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["detail"])' "$path")"
+
+path=$(env -u CLAUDE_CONFIG_DIR HOME="$WORK/homerec" python3 "$RECORD" --repo acme/thing --pr 12 --head "$HEAD40" --kind e2e --result pass --producer session-e2e)
+check "record.py writes under HOME/.claude without CLAUDE_CONFIG_DIR" \
+  "$WORK/homerec/.claude/pr-records/acme/thing/$HEAD40" "$(dirname "$path")"
+
+path=$(recbase --kind e2e --result waived --detail "waived by the operator on 2026-11-02: no browser here")
+check "record.py accepts an e2e waiver whose detail carries a date" "0" "$?"
+check "record.py lowercases an upper-case head" "$WORK/cfgrec/pr-records/acme/thing/$HEAD40" \
+  "$(dirname "$(rec --repo acme/thing --pr 12 --head "$(printf %s "$HEAD40" | tr a-f A-F)" --kind review --result pass --producer x)")"
+
+long=$(python3 -c 'print("x" * 501)')
+for case in \
+  "short head|--repo acme/thing --pr 12 --head 0123456 --kind review --result pass --producer x" \
+  "non-hex head|--repo acme/thing --pr 12 --head ${HEAD40%?}g --kind review --result pass --producer x" \
+  "unknown kind|--repo acme/thing --pr 12 --head $HEAD40 --kind screenshots --result pass --producer x" \
+  "unknown result|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result ok --producer x" \
+  "waived review|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result waived --detail 2026-11-02 --producer x" \
+  "waiver without detail|--repo acme/thing --pr 12 --head $HEAD40 --kind e2e --result waived --producer x" \
+  "repo without owner|--repo thing --pr 12 --head $HEAD40 --kind review --result pass --producer x" \
+  "repo with a dot path|--repo acme/.. --pr 12 --head $HEAD40 --kind review --result pass --producer x" \
+  "pr not a number|--repo acme/thing --pr x --head $HEAD40 --kind review --result pass --producer x" \
+  "pr zero|--repo acme/thing --pr 0 --head $HEAD40 --kind review --result pass --producer x" \
+  "producer with a capital|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result pass --producer Bad" \
+  "producer with a slash|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result pass --producer a/b" \
+  "missing producer|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result pass" \
+  "unknown option|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result pass --producer x --force"; do
+  name=${case%%|*}
+  # shellcheck disable=SC2086
+  check_status "record.py refuses a $name with exit 2" 2 rec ${case#*|}
+done
+check_status "record.py refuses a waiver whose detail has no date with exit 2" 2 \
+  rec --repo acme/thing --pr 12 --head "$HEAD40" --kind e2e --result waived --detail "the operator said so" --producer x
+check_status "record.py refuses a detail past 500 characters with exit 2" 2 \
+  rec --repo acme/thing --pr 12 --head "$HEAD40" --kind review --result pass --detail "$long" --producer x
+check "record.py prints one error line on a usage error" "1" \
+  "$(rec --repo acme/thing --pr 12 --head 0123 --kind review --result pass --producer x 2>&1 >/dev/null | grep -c '^error: ')"
+check "record.py writes nothing on a usage error" "no" \
+  "$(rm -rf "$WORK/cfgrec2"; env CLAUDE_CONFIG_DIR="$WORK/cfgrec2" python3 "$RECORD" --repo acme/thing --pr 12 --head 0123 --kind review --result pass --producer x 2>/dev/null; [ -e "$WORK/cfgrec2/pr-records" ] && echo yes || echo no)"
+check "record.py imports nothing outside the standard library" "" \
+  "$(grep -E '^(import|from) ' "$RECORD" | grep -vE '^(import|from) (argparse|datetime|json|os|re|sys|tempfile)( |$)')"
+
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
