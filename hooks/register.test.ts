@@ -81,6 +81,10 @@ async function stubMod(
   })
 }
 
+// The engine runs of the act itself: the pr-gate read the ready guard makes
+// before a merge or an undraft goes ahead left out.
+const acts = (runs: any[]) => runs.filter((r) => r.command !== 'pr-gate')
+
 // The plugin's root: the directory above this file's.
 const ROOT = decodeURIComponent(new URL('..', import.meta.url).pathname).replace(/\/$/, '')
 // The path whose Read fails, when a test sets one.
@@ -868,7 +872,7 @@ test('a pr-ready on a repository in auto-merge is not asked', async ($, on) => {
   const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
   expect(out).toEqual({ result: 'ok' })
   expect(asked.length).toBe(0)
-  expect(runs.length).toBe(1)
+  expect(acts(runs).length).toBe(1)
 })
 
 test('a pr-ready on a repository not in auto-merge is asked', async ($, on) => {
@@ -1015,7 +1019,7 @@ for (const [command, args] of SOME_WRITES) {
     const out = await $.tool.call({ tool: 'mcp__github__gh', command, args, repo: 'acme/thing' })
     expect(out).toEqual({ result: 'ok' })
     expect(asked.length).toBe(0)
-    expect(runs.length).toBe(1)
+    expect(acts(runs).length).toBe(1)
   })
 
   test('a ' + command + ' with an ask and no rule on a repository not in auto-merge is asked', async ($, on) => {
@@ -1131,7 +1135,7 @@ test('without a repo in the call, the checkout\'s origin names the repository', 
   const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
   expect(out).toEqual({ result: 'ok' })
   expect(asked.length).toBe(0)
-  expect(runs.map((r) => r.argv[0])).toEqual(['git', 'python3'])
+  expect(acts(runs).map((r) => r.argv[0])).toEqual(['git', 'python3'])
 })
 
 test('GH_REPO names the repository before the origin, as it does for the engine', async ($, on) => {
@@ -1192,7 +1196,7 @@ test('a repo in the args alone names the repository', async ($, on) => {
   const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1, repo: 'acme/thing' } })
   expect(out).toEqual({ result: 'ok' })
   expect(asked.length).toBe(0)
-  expect(runs.map((r) => r.argv[0])).toEqual(['python3'])
+  expect(acts(runs).map((r) => r.argv[0])).toEqual(['python3'])
 })
 
 test('an https origin of a listed repository, in another case, is not asked', async ($, on) => {
