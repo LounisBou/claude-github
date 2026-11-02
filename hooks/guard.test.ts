@@ -317,6 +317,38 @@ test('enforce: a deny rule still refuses first, and the guard reads nothing', as
   })
 })
 
+// ---- a failure of the guard itself ----
+
+// A pr-gate answer with no repository: reading the records at its head throws
+// inside the guard.
+const BROKEN_GATE = {
+  pr: 12, state: 'open', draft: false, head: HEAD, labels: ['Not Ready'],
+  ci: { result: 'SUCCESS', failed: [], running: 0, skipped: [], total: 1 },
+}
+
+for (const phase of ['warn', 'enforce'] as const) {
+  for (const [route, call] of [['Bash', bash('gh pr merge 12 -R acme/thing --squash')], ['tool', gh('pr-merge', { pr: 12 })]] as const) {
+    test(phase + ': a guard that throws on a ' + route + ' merge reads as unverified readiness', async ($, on) => {
+      await inPhase(phase, async () => {
+        const seen = await world($, on, { gate: BROKEN_GATE, autoMerge: ['acme/thing'] })
+        const out: any = await $.tool.call(call)
+        const ran = route === 'Bash' ? seen.bash.length : commands(seen).filter((c) => c === 'pr-merge').length
+        if (phase === 'enforce') {
+          expect(String(out.deny)).toStartWith('github: readiness of acme/thing#12 unverified: ')
+          expect(ran).toBe(0)
+        } else {
+          expect(out.deny).toBeUndefined()
+          expect(ran).toBe(1)
+          expect(seen.logs.length).toBe(1)
+          expect(seen.logs[0]).toContain('github: ' + (route === 'Bash' ? 'gh pr merge' : 'pr-merge') + ' on acme/thing#12 is not ready')
+          expect(seen.logs[0]).toContain('readiness unverified: ')
+          expect(JSON.parse(seen.writes.find((w) => w.path === '/data/guard-warn.log')!.text.trim()).route).toBe(route.toLowerCase())
+        }
+      })
+    })
+  }
+}
+
 // ---- leaving draft for CI ----
 
 for (const phase of ['warn', 'enforce'] as const) {

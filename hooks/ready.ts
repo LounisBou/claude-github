@@ -376,8 +376,10 @@ export function notReadyRefusal(act: string, repo: string, pr: number, head: str
     + ' green CI are all at its current head (engine/WRITING.md « Ready pull requests »).'
 }
 
-export function unverifiedRefusal(repo: string, pr: number | string, error: string): string {
-  return 'github: readiness of ' + repo + '#' + pr + ' unverified: ' + error
+// repo undefined: the call names no repository the guard could read.
+export function unverifiedRefusal(repo: string | undefined, pr: number | string | undefined, error: string): string {
+  if (repo === undefined) return 'github: readiness unverified: ' + error
+  return 'github: readiness of ' + repo + '#' + (pr ?? '?') + ' unverified: ' + error
 }
 
 export function draftRefusal(act: string): string {

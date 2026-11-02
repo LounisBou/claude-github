@@ -692,6 +692,16 @@ async function refuseNotReady($: any, act: Act, repo: string, pr: number, r: Rea
   return notReadyRefusal(act.name, repo, pr, gate.head, r.missing)
 }
 
+// The Bash ready guard failed on its own: under warn the command goes on with
+// a warn line, under enforce it is refused as a readiness that could not be read.
+async function guardThrew($: any, act: Act | undefined, err: any): Promise<string | undefined> {
+  const error = String(err?.message ?? err).trim()
+  if (await phaseOf($) === 'enforce') return unverifiedRefusal(act?.repo, act?.pr, error)
+  const named: Act = act ?? { kind: 'merge', name: 'the command' }
+  await warnAct($, named, 'bash', act?.repo ?? '?', act?.pr ?? '?', '', ['readiness unverified: ' + error])
+  return undefined
+}
+
 // The tool's act: checked before any question under enforce, and once it goes
 // ahead under warn. A CI undraft runs as pr-ready --for-ci, which keeps Not Ready.
 function toolReady($: any, e: any, act: Act) {
@@ -712,11 +722,16 @@ function toolReady($: any, e: any, act: Act) {
     if (!repo || pr === undefined) {
       return { repo: repo ?? 'the origin repository', pr: pr ?? '?', r: { missing: [], error: 'no repository or pull request named' } }
     }
-    read = read ?? await readiness($, repo, pr, act.sha)
-    if (act.kind === 'undraft' && read.gate && ciUndraft(read.gate)) {
-      forCi = true
-      e.args = { ...e.args, 'for-ci': true }
-      return undefined
+    try {
+      read = read ?? await readiness($, repo, pr, act.sha)
+      if (act.kind === 'undraft' && read.gate && ciUndraft(read.gate)) {
+        forCi = true
+        e.args = { ...e.args, 'for-ci': true }
+        return undefined
+      }
+    } catch (err: any) {
+      // The guard's own failure reads as a readiness that could not be read.
+      read = { missing: [], error: String(err?.message ?? err).trim() }
     }
     if (read.error || read.missing.length > 0) return { repo, pr, r: read }
     return undefined
@@ -730,7 +745,11 @@ function toolReady($: any, e: any, act: Act) {
       const found = await evaluate()
       if (!found) return undefined
       if (found.r.error) return unverifiedRefusal(found.repo, found.pr, found.r.error)
-      return refuseNotReady($, act, found.repo, Number(found.pr), found.r)
+      try {
+        return await refuseNotReady($, act, found.repo, Number(found.pr), found.r)
+      } catch (err: any) {
+        return unverifiedRefusal(found.repo, found.pr, String(err?.message ?? err).trim())
+      }
     },
     // Whether this is an undraft for CI, read in both phases.
     async ciUndraft(): Promise<boolean> {
@@ -1085,8 +1104,16 @@ export function register(on: any): void {
     const unread = await writingUnread($, command, e.agentId)
     if (unread) return { deny: unread }
     const after: Array<(result: any) => Promise<void>> = []
-    for (const act of bashActs(String(e.command))) {
-      const refused = await bashReady($, act, after)
+    let current: Act | undefined
+    try {
+      for (const act of bashActs(String(e.command))) {
+        current = act
+        const refused = await bashReady($, act, after)
+        if (refused) return { deny: refused }
+      }
+    } catch (err) {
+      // The ready guard failed on its own: its readiness reads as unverified, never as a pass.
+      const refused = await guardThrew($, current, err)
       if (refused) return { deny: refused }
     }
     const result = await next(e)
