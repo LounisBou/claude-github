@@ -407,6 +407,14 @@ for (const phase of ['warn', 'enforce'] as const) {
   })
 }
 
+test('going back to draft through the tool is not asked outside auto-merge', async ($, on) => {
+  const seen = await world($, on, { verdict: { decision: 'ask' }, answer: 'Deny' })
+  const out: any = await $.tool.call(gh('pr-draft', { pr: 12 }, 'acme/other'))
+  expect(out).toEqual({ result: 'ok' })
+  expect(seen.asked).toEqual([])
+  expect(commands(seen)).toEqual(['pr-draft'])
+})
+
 test('a pull request that carries Ready, or whose CI is green, is no CI undraft', async ($, on) => {
   await inPhase('enforce', async () => {
     await world($, on, { ...NO_RECORDS, autoMerge: ['acme/thing'] })

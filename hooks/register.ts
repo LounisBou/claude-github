@@ -96,9 +96,10 @@ async function permit(
   const notReady = beforeAsk ? await beforeAsk() : undefined
   if (notReady) return notReady
 
-  // Leaving draft for CI, still Not Ready, is no approval to give: it runs in
-  // every repository, as through Bash. An ask from an explicit rule stands.
-  if (ciUndraft && await ciUndraft()) {
+  // Going back to draft, and leaving it for CI still Not Ready, are no
+  // approvals to give: they run in every repository, as through Bash. An ask
+  // from an explicit rule stands.
+  if (e.command === 'pr-draft' || (ciUndraft && await ciUndraft())) {
     if (verdict.decision === 'allow' || !verdict.rule) return undefined
     return ask($, describe(e) + '?', ['Allow', 'Deny'], e.command)
   }
