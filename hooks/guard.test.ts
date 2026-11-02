@@ -548,7 +548,7 @@ test('a push of the current branch reads it in the session\'s checkout', async (
 
 test('the records are refused to Write, Edit and Bash, a Read of one passes', async ($, on) => {
   const seen = await world($, on)
-  const refusal = 'github: records are written by their producers (pr-review\'s auto-fix-loop, /norms:check, the'
+  const refusal = 'github: records are written by their producers (claude-review\'s auto-fix-loop, /norms:check, the'
     + ' orchestrator\'s ready, mcp__github__record for E2E), never by hand.'
   for (const call of [
     { tool: 'Write', file_path: RECORDS + '/acme/thing/' + HEAD + '/e2e.x.json', content: '{}' },

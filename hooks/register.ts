@@ -896,7 +896,7 @@ async function writeRecord($: any, e: any, origin: string): Promise<{ result?: s
   const kind = e.kind === undefined || e.kind === null || e.kind === '' ? owned : String(e.kind)
   if (kind !== owned) {
     return {
-      deny: 'github: ' + kind + ' records are written by their producer (pr-review\'s auto-fix-loop for review,'
+      deny: 'github: ' + kind + ' records are written by their producer (claude-review\'s auto-fix-loop for review,'
         + ' /norms:check for norms): ' + (origin === 'engine' ? 'this tool' : origin) + ' writes ' + owned + ' only.',
     }
   }

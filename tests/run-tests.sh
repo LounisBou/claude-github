@@ -1492,12 +1492,23 @@ check "no attribution trailers in history" "0" \
 # minus this test suite itself -- a developer-only harness, never installed
 # or read as part of using the plugin, and the one file guaranteed to spell
 # out the search string in its own source.
+#
+# Two narrow exceptions. The hooks test files (hooks/*.test.ts) are
+# developer-only like this suite, and spell out the name to prove the record
+# tool tells the review's plugin apart. The one line of hooks/ready.ts that
+# defines REVIEW_PLUGIN carries the name the host installs claude-review
+# under, which is what a hook call's origin reports; every other line still
+# counts, so a refusal text or a doc naming the old plugin still fails here.
 old_name_hits=""
 for f in $(cd "$ROOT" && git ls-files); do
   case "$f" in
     tests/run-tests.sh) continue ;;
+    hooks/*.test.ts) continue ;;
   esac
   hit=$(grep -inE 'pr-review([^s]|$)' "$ROOT/$f" 2>/dev/null || true)
+  if [ "$f" = hooks/ready.ts ]; then
+    hit=$(printf '%s\n' "$hit" | grep -vE "^[0-9]+:export const REVIEW_PLUGIN = 'pr-review'$" || true)
+  fi
   if [ -n "$hit" ]; then
     old_name_hits="$old_name_hits
 $f: $hit"

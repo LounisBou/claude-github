@@ -413,7 +413,7 @@ export function warnLine(act: string, repo: string, pr: number | string, missing
     + ' Missing: ' + missing.join(', ')
 }
 
-export const RECORDS_REFUSAL = 'github: records are written by their producers (pr-review\'s auto-fix-loop,'
+export const RECORDS_REFUSAL = 'github: records are written by their producers (claude-review\'s auto-fix-loop,'
   + ' /norms:check, the orchestrator\'s ready, mcp__github__record for E2E), never by hand.'
 
 // Whether a Bash command line names the records or their writer.
@@ -423,8 +423,10 @@ export function touchesRecords(line: string, root?: string): boolean {
 
 // The record kinds a caller of mcp__github__record may write, by the plugin
 // whose hook made the call: the model (the engine) and any other plugin write
-// only E2E, the review and the norms check have their own producers.
-export const RECORD_PRODUCERS: Record<string, string> = { 'pr-review': 'review', norms: 'norms' }
+// only E2E, the review and the norms check have their own producers. The
+// review's plugin is claude-review, installed under the name its host gives it.
+export const REVIEW_PLUGIN = 'pr-review'
+export const RECORD_PRODUCERS: Record<string, string> = { [REVIEW_PLUGIN]: 'review', norms: 'norms' }
 
 export function recordKindFor(origin: string): string {
   return RECORD_PRODUCERS[origin] ?? 'e2e'
