@@ -450,6 +450,74 @@ test('a pull request that carries Ready, or whose CI is green, is no CI undraft'
   })
 })
 
+// ---- the Ready label and the undraft against CI ----
+
+const LABEL_ACTS = [
+  ['tool', gh('pr-readiness', { pr: 12, state: 'ready' })],
+  ['Bash', bash('gh pr edit 12 -R acme/thing --add-label Ready')],
+] as const
+const UNDRAFT_ACTS = [
+  ['tool', gh('pr-ready', { pr: 12 })],
+  ['Bash', bash('gh pr ready 12 -R acme/thing')],
+] as const
+
+// Whether the act itself ran: the engine's command, or the Bash line.
+const actRan = (seen: Seen, route: string, command: string) =>
+  route === 'Bash' ? seen.bash.length : commands(seen).filter((c) => c === command).length
+
+for (const phase of ['warn', 'enforce'] as const) {
+  for (const [route, call] of LABEL_ACTS) {
+    for (const ci of [{ result: 'PENDING', running: 1 }, { result: 'FAILURE', failed: ['test'] }]) {
+      test(phase + ': the ' + route + ' Ready label on a Not Ready pull request with the three records and CI '
+        + ci.result + ' is no CI undraft', async ($, on) => {
+        await inPhase(phase, async () => {
+          const seen = await world($, on, { ci })
+          const out: any = await $.tool.call(call)
+          const missing = ci.result === 'FAILURE' ? 'CI failed: test' : 'CI still running'
+          if (phase === 'enforce') {
+            expect(out.deny).toContain('refused on acme/thing#12 at 0123456: not ready. Missing: ' + missing + '.')
+            expect(actRan(seen, route, 'pr-readiness')).toBe(0)
+          } else {
+            expect(out.deny).toBeUndefined()
+            expect(actRan(seen, route, 'pr-readiness')).toBe(1)
+            expect(seen.logs).toEqual([expect.stringContaining('is not ready, let through while the guard only warns. Missing: ' + missing)])
+          }
+        })
+      })
+    }
+
+    test(phase + ': the ' + route + ' Ready label with the four holding passes with no warn line', async ($, on) => {
+      await inPhase(phase, async () => {
+        const seen = await world($, on)
+        const out: any = await $.tool.call(call)
+        expect(out.deny).toBeUndefined()
+        expect(actRan(seen, route, 'pr-readiness')).toBe(1)
+        expect(seen.logs).toEqual([])
+        expect(seen.writes.filter((w) => w.path === WARN_LOG)).toEqual([])
+      })
+    })
+  }
+
+  for (const [route, call] of UNDRAFT_ACTS) {
+    test(phase + ': a ' + route + ' undraft of a pull request carrying Ready with CI not green is no CI undraft', async ($, on) => {
+      await inPhase(phase, async () => {
+        const seen = await world($, on, { labels: ['Ready'], autoMerge: ['acme/thing'], ci: { result: 'PENDING', running: 1 } })
+        const out: any = await $.tool.call(call)
+        expect(seen.logs.some((l) => l.includes('out of draft to run CI'))).toBe(false)
+        if (phase === 'enforce') {
+          expect(out.deny).toContain('refused on acme/thing#12 at 0123456: not ready. Missing: CI still running.')
+          expect(actRan(seen, route, 'pr-ready')).toBe(0)
+        } else {
+          expect(out.deny).toBeUndefined()
+          expect(actRan(seen, route, 'pr-ready')).toBe(1)
+          expect(seen.runs.find((r) => r.command === 'pr-ready')?.args?.['for-ci']).toBeUndefined()
+          expect(seen.logs).toEqual([expect.stringContaining('is not ready, let through while the guard only warns. Missing: CI still running')])
+        }
+      })
+    })
+  }
+}
+
 // ---- Bash ----
 
 for (const phase of ['warn', 'enforce'] as const) {
