@@ -60,20 +60,22 @@ def pr_checks(args):
 
 
 def _gate_ci(statuses, runs, draft):
-    """CI at one head, as the ready guard reads it. A failure names its check.
-    A check still running, one skipped and, on a draft, one neutral are not
-    green: the CI did not pass there. No check at all is green."""
+    """CI at one head, as the ready guard reads it. A completed check passes
+    on success, and on neutral out of draft. A skipped one, and on a draft a
+    neutral one, did not prove anything: not green. Any other conclusion is a
+    failure, named by its check. A check still running is not green. No check
+    at all is green."""
     commit_statuses = (statuses or {}).get("statuses") or []
+    passing = ("success",) if draft else ("success", "neutral")
+    unproven = ("skipped", "neutral") if draft else ("skipped",)
+    completed = [run for run in runs if run.get("status") == "completed"]
     failed = [
-        run.get("name", "?") for run in runs if run.get("conclusion") in ("failure", "timed_out", "cancelled", "action_required", "stale")
+        run.get("name", "?") for run in completed if run.get("conclusion") not in passing + unproven
     ] + [status.get("context", "?") for status in commit_statuses if status.get("state") in ("failure", "error")]
     running = [run for run in runs if run.get("status") != "completed"] + [
         status for status in commit_statuses if status.get("state") == "pending"
     ]
-    unproven = ("skipped", "neutral") if draft else ("skipped",)
-    skipped = [
-        run.get("name", "?") for run in runs if run.get("status") == "completed" and run.get("conclusion") in unproven
-    ]
+    skipped = [run.get("name", "?") for run in completed if run.get("conclusion") in unproven]
     if failed:
         result = "FAILURE"
     elif running or skipped:

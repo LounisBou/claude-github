@@ -1871,6 +1871,9 @@ check "pr-gate reads a neutral check out of draft as green" "SUCCESS   1" "$(ci8
 gate8 neutral-draft "$(printf '%s' "$PULL8" | sed 's/"draft":false/"draft":true/')" '{"statuses":[]}' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}'
 check "pr-gate never reads a neutral check on a draft as green" "PENDING  scan 1" "$(ci8)"
 
+gate8 startup "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"build","status":"completed","conclusion":"startup_failure"},{"name":"lint","status":"completed","conclusion":"success"}]}'
+check "pr-gate reads a check that failed to start as failed" "FAILURE build  2" "$(ci8)"
+
 gate8 merged "$(printf '%s' "$PULL8" | sed 's/"state":"open"/"state":"closed","merged_at":"2026-11-01T00:00:00Z"/')" '{"statuses":[]}' '{"check_runs":[]}'
 check "pr-gate says merged for a merged pull request" "merged" \
   "$(gh8 pr-gate 12 | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
