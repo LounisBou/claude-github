@@ -337,17 +337,21 @@ export function missingItems(gate: Gate, files: RecordFile[], sha?: string): str
     const before = latest.get(kind)
     if (!before || String(record.at) >= String(before.at)) latest.set(kind, record)
   }
+  let kindMissing = false
   for (const kind of KINDS) {
     const record = latest.get(kind)
     const accepted = record && (record.result === 'pass' || (kind === 'e2e' && record.result === 'waived'))
     if (accepted) continue
+    kindMissing = true
     if (!record) missing.push(kind + ': no record at ' + head7(gate.head))
     else {
       missing.push(kind + ': ' + record.result + ' at ' + head7(gate.head) + ' by ' + record.producer
         + (record.detail ? ', ' + record.detail : ''))
     }
   }
-  for (const name of skipped) missing.push('unreadable record ' + name)
+  // A file skipped is named only beside a kind it may have been meant for: with
+  // the three accepted it blocks nothing, as nobody may delete it.
+  if (kindMissing) for (const name of skipped) missing.push('unreadable record ' + name)
   const ci = gate.ci
   if (ci.result === 'FAILURE') missing.push('CI failed: ' + (ci.failed ?? []).join(', '))
   else if (ci.result !== 'SUCCESS') {

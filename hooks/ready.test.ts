@@ -64,10 +64,24 @@ test('a record of another head, repository or pull request is skipped and named'
 })
 
 test('a file that does not parse, or names another kind than its file, is named', () => {
-  const files = [...ALL, { name: 'review.20261101T120000Z.x.json', text: '{not json' }]
-  expect(missingItems(gate(), files)).toEqual(['unreadable record review.20261101T120000Z.x.json'])
+  const noE2e = ALL.filter((r) => !r.name.startsWith('e2e'))
+  const files = [...noE2e, { name: 'review.20261101T120000Z.x.json', text: '{not json' }]
+  expect(missingItems(gate(), files)).toEqual(['e2e: no record at 0123456', 'unreadable record review.20261101T120000Z.x.json'])
   const misnamed = { name: 'norms.20261101T120000Z.x.json', text: record('review', 'fail').text }
-  expect(missingItems(gate(), [...ALL, misnamed])).toEqual(['unreadable record norms.20261101T120000Z.x.json'])
+  expect(missingItems(gate(), [...noE2e, misnamed])).toEqual(['e2e: no record at 0123456', 'unreadable record norms.20261101T120000Z.x.json'])
+})
+
+test('an unreadable file beside the three accepted records does not block', () => {
+  const bad = { name: 'review.20261101T120000Z.x.json', text: '{not json' }
+  expect(missingItems(gate(), [...ALL, bad])).toEqual([])
+})
+
+test('an unreadable file is named when a kind is missing too', () => {
+  const bad = { name: 'e2e.20261101T120000Z.x.json', text: '{not json' }
+  const files = [...ALL.filter((r) => !r.name.startsWith('e2e')), bad]
+  expect(missingItems(gate(), files)).toEqual(['e2e: no record at 0123456', 'unreadable record ' + bad.name])
+  expect(notReadyRefusal('pr-merge', 'acme/thing', 12, HEAD, missingItems(gate(), files)))
+    .toContain('Missing: e2e: no record at 0123456, unreadable record ' + bad.name + '.')
 })
 
 test('no check at all is green', () => {
