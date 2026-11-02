@@ -660,6 +660,15 @@ test('the records are refused to Write, Edit and Bash, a Read of one passes', as
   expect(seen.bash).toEqual([])
 })
 
+test('a command that only mentions the records in its text passes, a path to them is refused', async ($, on) => {
+  const seen = await world($, on)
+  const commit: any = await $.tool.call(bash('git commit -m "docs: mention pr-records in the README"'))
+  expect(commit.deny).toBeUndefined()
+  const rm: any = await $.tool.call(bash('rm ~/.claude/pr-records/x'))
+  expect(rm.deny).toContain('github: records are written by their producers')
+  expect(seen.bash).toEqual(['git commit -m "docs: mention pr-records in the README"'])
+})
+
 // ---- the record tool ----
 
 const CLEAN = {

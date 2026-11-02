@@ -336,7 +336,7 @@ github: <gh pr merge | gh pr ready> refused on <owner/name>: this repository is 
 ```
 
 **Records.** A Write, an Edit or a MultiEdit under the records root, and a shell command
-naming that root, `pr-records` or `engine/record.py`, are refused, whatever the command
+naming that root, a `pr-records/` path or `engine/record.py`, are refused, whatever the command
 does with it (a Read of a record passes):
 
 ```

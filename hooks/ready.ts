@@ -418,9 +418,13 @@ export function warnLine(act: string, repo: string, pr: number | string, missing
 export const RECORDS_REFUSAL = 'github: records are written by their producers (claude-review\'s auto-fix-loop,'
   + ' /norms:check, the orchestrator\'s ready, mcp__github__record for E2E), never by hand.'
 
+// A path into the records, or to their directory itself: a message or a body
+// that only names the word is no path.
+const RECORDS_PATH = /pr-records\/|\/pr-records(?![\w.-])/
+
 // Whether a Bash command line names the records or their writer.
 export function touchesRecords(line: string, root?: string): boolean {
-  return line.includes('pr-records') || line.includes('engine/record.py') || (!!root && line.includes(root))
+  return RECORDS_PATH.test(line) || line.includes('engine/record.py') || (!!root && line.includes(root))
 }
 
 // The record kinds a caller of mcp__github__record may write, by the plugin

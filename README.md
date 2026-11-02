@@ -191,7 +191,7 @@ A CI undraft, as above, is the exception, through the shell and the tool alike.
 
 **Records.** The records are written by their producers alone. A Write, an Edit
 or a MultiEdit under the records root, and a shell command that names it,
-`pr-records` or `engine/record.py`, are refused with:
+a `pr-records/` path or `engine/record.py`, are refused with:
 
 ```
 github: records are written by their producers (claude-review's auto-fix-loop, /norms:check, the orchestrator's ready, mcp__github__record for E2E), never by hand.
