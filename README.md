@@ -107,6 +107,24 @@ rules still apply. Elsewhere every write is asked as before. An absent file
 lists no repository; an unreadable or malformed one lists none either and
 says so in one transcript line. The plugin never writes the file.
 
+## Guards
+
+**WRITING.md read.** Before a session writes a commit (`git commit`), opens, edits
+or comments a pull request or an issue (`gh pr create`, `gh issue create`, `gh pr
+comment`, `gh issue comment`, `gh pr review` with a body, `gh pr edit` and `gh
+issue edit` with a title or a body), or calls the tool with a text, it reads
+`engine/WRITING.md` whole: the Read tool from its first line to its last, or a
+Bash `cat` or `sed -n '1,$p'` of it. Each subagent reads for itself, and a
+compaction asks for one more read. Commands are read word by word, so a message
+that only mentions one passes. Until then the call is refused with:
+
+```
+github: read <root>/engine/WRITING.md with the Read tool, whole, before <command>: its rules (commit convention, references, PR titles and descriptions, comments) apply to this text. Then run the same command again.
+```
+
+A failure of the guard itself lets the call through with one transcript line,
+and the writing rules above still apply.
+
 ## Tests
 
 Two suites, both offline — no network, no account:

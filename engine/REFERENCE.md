@@ -54,6 +54,8 @@ or a review comment, read `WRITING.md` beside this file.
 
 `pr-merge --sha <full sha>` sends the head that was verified, and GitHub refuses the merge
 if the head has moved since.
+`--match-head-commit` takes the full sha read by `git rev-parse` or `headRefOid`, never
+copied from a short form or completed by hand.
 
 A PR that GitHub counts as part of a stack refuses the synchronous merge with a 403, so
 `pr-merge` then uses the asynchronous merge endpoint with the same method (and the same sha
@@ -202,6 +204,31 @@ python3 "$GH" image-upload before.png after.png --title "Before" --title "After"
 call is refused as a usage error.
 
 Requires push access to the repository.
+
+## Pushing from the sandbox
+
+Outgoing SSH is blocked in the sandbox, even through `!`. Push over HTTPS with gh's
+token and an empty `credential.helper=` first, to avoid the keychain dialogs:
+`git -c credential.helper= -c credential.helper='!f(){ echo username=x-access-token; echo "password=$(gh auth token)"; }; f' push https://github.com/<owner>/<repo>.git HEAD:<branch>`.
+A push by URL does not update `refs/remotes/origin/*`: `--force-with-lease` takes an
+explicit sha (`--force-with-lease=<branch>:<full sha>`). Same pattern for `fetch`.
+Never « external terminal ».
+
+## Guards
+
+**WRITING.md read.** A commit (`git commit`), a pull request or an issue opened, edited
+with a title or a body, or commented (`gh pr create`, `gh issue create`, `gh pr
+comment`, `gh issue comment`, `gh pr review` with a body, `gh pr edit` and `gh issue
+edit` with a title or a body), and every call of this tool that carries a text, waits
+until `WRITING.md` beside this file was read whole in the context that writes it: the
+Read tool from its first line to its last, or a Bash `cat` or `sed -n '1,$p'` of it.
+Each subagent reads for itself, and a compaction asks for one more read. The command
+is read word by word, so a message or a body that only mentions one of these commands
+passes. Until then the call is refused with:
+
+```
+github: read <root>/engine/WRITING.md with the Read tool, whole, before <command>: its rules (commit convention, references, PR titles and descriptions, comments) apply to this text. Then run the same command again.
+```
 
 ## Exit codes
 

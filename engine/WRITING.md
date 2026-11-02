@@ -6,20 +6,24 @@ review comments.
 
 ## Commit messages
 
-Follow the target repository's own convention, read from `git log --format=%s -10`,
-never imposed from outside: Conventional Commits `<type>(<scope>): <description>`
-where the log already uses that form, imperative prose otherwise. Write in the
-imperative mood ("add", not "added" or "adds"). Add a body only when the why is not
+Conventional Commits in every repository: `<type>[(<scope>)]: <description>`. Write in
+the imperative mood ("add", not "added" or "adds"). Add a body only when the why is not
 obvious from the diff itself. No trailer of any kind: no `Co-Authored-By`, no
 `Claude-Session`, no attribution of any form, no semicolon. No reference to a plan
 `phase`, an `agent`, an `AI`, an `orchestrator`, a `session`, a `brief` or any other
-workflow mechanics — the history must read as a developer's own work, in business and
-technical terms only.
+workflow mechanics in any durable artifact (code, comment, doc, commit, PR) — the
+history must read as a developer's own work, in business and technical terms only. No
+information specific to GeoNative in a public repository (code, commit, title,
+description).
+
+Types: `feat`, `fix`, `chore`, `refactor`, `style`, `docs`, `test`, `perf`, `build`,
+`ci`. Examples: `feat(scraper): create TvShow nfo file`, `chore: add json5 dependency`,
+`refactor(dispatch): extract folder_for to resolver`, `fix(conf): add missing Config
+import`. Never a version prefix (`vX.Y.Z: …`): the version belongs to the release notes.
 
 ## Pull request titles
 
-The same convention as the commits of that repository: Conventional Commits
-`<type>(<scope>): <description>` where the log uses it, imperative prose otherwise.
+The same convention as the commits: `<type>[(<scope>)]: <description>`.
 One line, stating what the change does, with no semicolon. No workflow vocabulary —
 the same words forbidden in commit messages.
 
@@ -29,6 +33,15 @@ belongs in the description.
 
 Too long: `test(device-server): stop the listen tests on their awaited event instead of a fixed timer`
 Right: `test(device-server): fix flaky listen tests`
+
+## References to pull requests and issues
+
+Name a pull request or an issue with its repository, always: `infra#195`,
+`geonative-api#1778`. Never a bare `#195`, never « PR #15 », and every item of a list
+carries its prefix, even in a table whose column names the repository. One number
+exists in several repositories and a bare one can send a merge or a review to the
+wrong PR. Only the formats GitHub resolves inside its own repository keep `(#N)`: a
+squashed commit title, a PR body.
 
 ## Pull request descriptions
 
@@ -83,12 +96,32 @@ PR strictly before the other (an API PR strictly before an infra PR, or the reve
 the TODOs say that order explicitly. `**Related PRs:**` lists the PRs truly linked to
 this work: part of the same batch, the origin of the bug, or a link of that strength,
 never a distant link. A follow-up PR, one that must come after this one, is never listed
-in Related PRs. English always, with no
+in Related PRs. State what ships first. `PRs Dependency` lists PRs that ship before,
+and two PRs never depend on each other. English always, with no
 semicolon. No workflow vocabulary. Every PR is opened as a draft (`pr-create
---draft`, the house default), un-drafted only on the operator's explicit word,
-except in a repository he lists in auto-merge (see the README), where `pr-ready`
-needs no word of his.
-An existing description is replaced without asking, under the rules above.
+--draft`, the house default), and leaves draft only once it is ready. Outside
+auto-merge, leaving draft and merging also need the operator's explicit word, given
+through this tool, which asks him in the conversation. In a
+repository in auto-merge, the merge, leaving draft and the deployment its method
+foresees need no approval of the operator once the pull request is ready.
+Reviewers are requested only when the operator asks, and never on a draft.
+The description of the operator's own draft PR is published and edited without asking.
+A colleague's PR and any review comment are proposed first.
+
+A paragraph stating the ship order is always added to a description, without asking:
+add, re-read, report in one line. Every (#N) written in a description comes from PR
+#N's own files and body, never by eye. A TODO goes only on the PR that enables its
+step: it runs when that PR ships.
+
+A pull request that changes an interface carries screenshots of what it changes,
+desktop AND mobile on a project with a mobile version. Every image is audited before
+the PR is Ready, and a PR without both is not ready. When a visual is fixed after the
+merge, retake the screenshots and replace them on GitHub and Notion.
+
+A pull request carries no change its purpose does not need: no reformatting, no
+renaming, no unrelated file. A refactor needed for the change to be clean and
+architecturally sound is part of it: it is done in a commit of its own and named in
+the description. A refactor unrelated to the purpose goes in its own pull request.
 
 ## Security update pull requests
 
@@ -132,6 +165,9 @@ A short, ready-to-paste suggestion accompanies the point. English on GitHub, wit
 semicolon. Every comment states plainly whether it is blocking or nice-to-have. No
 workflow vocabulary. Nothing is posted without the operator's explicit approval of
 that exact text. A thread a code change has already closed is answered by the
-change itself — a reply only says what the code cannot.
+change itself — a reply only says what the code cannot. Verify first, then ask how it
+works, in a two-developers tone, with no colon and no semicolon. On the operator's own
+PR a review item is fixed in code, not answered by a comment. Dependent PRs stack,
+never a follow-up fix PR. A commit to split off stays in the current PR.
 
 These rules come from the operator and apply to every repository this tool touches.

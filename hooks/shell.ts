@@ -1,0 +1,248 @@
+// A command line read the way the shell reads it, ported from
+// claude-orchestrator's hooks/tokenizer.ts (itself the awk tokeniser of its
+// push guard). The same quoting, heredoc, comment, $((…)), assignment and
+// wrapper rules: a heredoc body, a comment and text in quotes that is an
+// argument (a commit message, a body) are data and never read as a command.
+// One change: the argument of bash -c, sh -c and zsh -c is read again, one
+// level deep. Pure functions only.
+
+// Words that end a simple command or open a group: skipped in command position
+// the way an assignment is.
+const RESERVED = new Set(['!', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', 'time'])
+// Commands that wrap the real one: everything until a word that is not an option
+// of the wrapper is skipped before the real command is read.
+const WRAPPER = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'timeout', 'gtimeout', 'sudo', 'xargs'])
+// A wrapper's options that take a value, keyed "wrapper option".
+const VALUED = new Set([
+  'env -u', 'env -C', 'env -S', 'nice -n', 'timeout -s', 'timeout -k', 'gtimeout -s', 'gtimeout -k',
+  'sudo -u', 'sudo -g', 'sudo -C', 'sudo -h', 'sudo -p', 'xargs -n', 'xargs -I', 'xargs -P',
+  'xargs -L', 'xargs -s', 'xargs -d', 'xargs -E', 'xargs -a',
+])
+// git global options that take a value: `git -C /tmp/r commit` commits.
+const GITVALUED = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env'])
+// The shells whose -c argument is a command line of its own.
+const SHELL = /^(.*\/)?(bash|sh|zsh)$/
+
+// Where a git command's subcommand sits in its argv, past git's global options,
+// or undefined when the argv is not git's or names no subcommand.
+export function gitSubcommand(argv: string[]): { at: number } | undefined {
+  if (argv.length === 0 || !/^(.*\/)?git$/.test(argv[0])) return undefined
+  let k = 1
+  for (; k < argv.length && argv[k].startsWith('-'); k++) if (GITVALUED.has(argv[k])) k++
+  return k < argv.length ? { at: k } : undefined
+}
+
+// The argv of every simple command on the line, quotes removed, from its real
+// command on: the assignments, reserved words and wrappers before it skipped.
+// A command inside $(…) or backticks is one of its own.
+export function simpleCommands(line: string): string[][] {
+  const out = tokenize(line)
+  for (const argv of [...out]) {
+    const inner = shellArgument(argv)
+    if (inner !== undefined) out.push(...tokenize(inner))
+  }
+  return out
+}
+
+// The command line a shell runs with -c (alone or in a cluster such as -lc):
+// the first word after its options, the option each -o or -O sets skipped
+// (`bash -o pipefail -c …`, `bash -euo pipefail -c …`).
+function shellArgument(argv: string[]): string | undefined {
+  if (!SHELL.test(argv[0] ?? '')) return undefined
+  let dashC = false
+  for (let k = 1; k < argv.length; k++) {
+    const word = argv[k]
+    if (/^-[A-Za-z]+$/.test(word)) {
+      if (word.includes('c')) dashC = true
+      k += word.replace(/[^oO]/g, '').length
+      continue
+    }
+    if (word.startsWith('-')) continue
+    return dashC ? word : undefined
+  }
+  return undefined
+}
+
+function tokenize(command: string): string[][] {
+  const found: string[][] = []
+
+  // The whole command with one trailing newline, and 1-based positions as in
+  // the awk being ported: at() is substr(s, i, 1), rest() substr(s, i), find()
+  // index(substr(s, i), c) as an absolute position, 0 when absent.
+  const s = command + '\n'
+  const L = s.length
+  const at = (p: number): string => (p >= 1 && p <= L ? s.charAt(p - 1) : '')
+  const rest = (p: number): string => s.slice(p - 1)
+  const find = (c: string, p: number): number => {
+    const r = s.indexOf(c, p - 1)
+    return r === -1 ? 0 : r + 1
+  }
+
+  // Per-depth state, index 0 the top level: the closer that ends this nesting
+  // (` or )), the words of the simple command being read, the paren depth inside
+  // it, whether a double quote is open, whether the next word is a redirected
+  // fd's target and must be dropped. Pending heredocs queue their delimiters
+  // (HD) and <<- tab stripping (HS) for bodies(), hdone counting those read.
+  const closer = ['']
+  const words: string[][] = [[]]
+  const pd = [0]
+  const dq = [0]
+  const sk = [0]
+  let d = 0
+  let cur = ''
+  let started = 0
+  const HD = ['']
+  const HS = [0]
+  let hn = 0
+  let hdone = 0
+
+  function push(cl: string): void {
+    flushWord(); d++; closer[d] = cl; words[d] = []; pd[d] = 0; dq[d] = 0; sk[d] = 0
+  }
+  function pop(): void {
+    flushWord(); flushCmd(); d--
+    cur = ''
+    started = dq[d] ? 1 : 0
+  }
+  function flushWord(): void {
+    if (started) {
+      if (sk[d]) sk[d] = 0
+      else words[d].push(cur)
+    }
+    cur = ''
+    started = 0
+  }
+  function flushCmd(): void {
+    analyze(d)
+    words[d] = []
+    sk[d] = 0
+  }
+  // `$((...))` is arithmetic, not a command: skipped whole, so a `<<` inside it is no heredoc.
+  function arith(j: number): number {
+    let n = 0
+    for (; j <= L; j++) {
+      const ch = at(j)
+      if (ch === '(') n++
+      else if (ch === ')') { n--; if (n === 0) return j + 1 }
+    }
+    return j
+  }
+  // After `<<` or `<<-`: the delimiter, quotes removed. The body starts at the next newline.
+  function heredoc(j: number): number {
+    let strip = 0
+    if (at(j) === '-') { strip = 1; j++ }
+    while (at(j) === ' ' || at(j) === '\t') j++
+    let dl = ''
+    for (; j <= L; j++) {
+      const ch = at(j)
+      if (ch === "'" || ch === '"') {
+        const q = find(ch, j + 1)
+        if (q === 0) { dl += rest(j + 1); j = L + 1; break }
+        dl += s.slice(j, q - 1)
+        j = q
+        continue
+      }
+      if (ch === '\\') { dl += at(j + 1); j++; continue }
+      if (/[ \t\n;|&<>()]/.test(ch)) break
+      dl += ch
+    }
+    hn++; HD[hn] = dl; HS[hn] = strip
+    return j
+  }
+  function bodies(j: number): number {
+    for (let k = hdone + 1; k <= hn; k++) {
+      while (j <= L) {
+        const e = find('\n', j)
+        let line: string
+        if (e === 0) { line = rest(j); j = L + 1 }
+        else { line = s.slice(j - 1, e - 1); j = e + 1 }
+        if (HS[k]) line = line.replace(/^\t+/, '')
+        if (line === HD[k]) break
+      }
+    }
+    hdone = hn
+    return j
+  }
+  // A finished simple command: its argv from the real command on.
+  function analyze(depth: number): void {
+    const w = words[depth]
+    const n = w.length
+    let k = 1
+    while (k <= n) {
+      const word = w[k - 1]
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || RESERVED.has(word)) { k++; continue }
+      if (WRAPPER.has(word)) {
+        const wrap = word
+        k++
+        while (k <= n && w[k - 1].startsWith('-')) {
+          k += VALUED.has(`${wrap} ${w[k - 1]}`) ? 2 : 1
+        }
+        if (wrap === 'timeout' || wrap === 'gtimeout') k++
+        continue
+      }
+      break
+    }
+    if (k <= n) found.push(w.slice(k - 1))
+  }
+
+  // One pass over s, c the character, n1 the one after it.
+  let i = 1
+  while (i <= L) {
+    const c = at(i), n1 = at(i + 1)
+    if (dq[d]) {
+      if (c === '"') { dq[d] = 0; i++ }
+      else if (c === '\\') {
+        if (n1 === '\n') i += 2
+        else { cur += /[$`"\\]/.test(n1) ? n1 : c + n1; i += 2 }
+      }
+      else if (c === '`') { push('`'); i++ }
+      else if (c === '$' && n1 === '(') {
+        if (at(i + 2) === '(') i = arith(i + 1)
+        else { push(')'); i += 2 }
+      }
+      else { cur += c; i++ }
+      continue
+    }
+    if (c === ' ' || c === '\t') { flushWord(); i++ }
+    else if (c === '\n') { flushWord(); flushCmd(); i = bodies(i + 1) }
+    else if (c === '\\') { if (n1 !== '\n') { cur += n1; started = 1 } i += 2 }
+    else if (c === "'") {
+      const j = find("'", i + 1)
+      if (j === 0) { cur += rest(i + 1); i = L + 1 }
+      else { cur += s.slice(i, j - 1); i = j + 1 }
+      started = 1
+    }
+    else if (c === '$' && (n1 === "'" || n1 === '"')) i++
+    else if (c === '"') { dq[d] = 1; started = 1; i++ }
+    else if (c === '#' && !started) { while (i <= L && at(i) !== '\n') i++ }
+    else if (c === '$' && n1 === '(') {
+      if (at(i + 2) === '(') { i = arith(i + 1); started = 1 }
+      else { push(')'); i += 2 }
+    }
+    else if (c === '`') { if (d > 0 && closer[d] === '`') pop(); else push('`'); i++ }
+    else if (c === '(') { flushWord(); flushCmd(); pd[d]++; i++ }
+    else if (c === ')') {
+      flushWord(); flushCmd()
+      if (pd[d] > 0) pd[d]--
+      else if (d > 0 && closer[d] === ')') pop()
+      i++
+    }
+    else if (c === ';' || c === '|') { flushWord(); flushCmd(); i++ }
+    else if (c === '&') { flushWord(); if (n1 !== '>') flushCmd(); i++ }
+    else if (c === '<' && n1 === '<') {
+      flushWord()
+      if (at(i + 2) === '<') { sk[d] = 1; i += 3 }
+      else i = heredoc(i + 2)
+    }
+    else if (c === '<' || c === '>') {
+      flushWord(); i++
+      while (/[<>&|]/.test(at(i))) i++
+      sk[d] = 1
+    }
+    else if (c === '{' || c === '}') { flushWord(); i++ }
+    else { cur += c; started = 1; i++ }
+  }
+  flushWord(); flushCmd()
+  while (d > 0) pop()
+  return found
+}
