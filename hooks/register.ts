@@ -639,6 +639,24 @@ async function readiness($: any, repo: string, pr: number, sha?: string): Promis
   return { gate, missing: missingItems(gate, await headRecords($, gate), sha) }
 }
 
+// A line added at the end of a file, the file created when absent. $.fs only
+// rewrites a file whole: a file already there is appended to by the shell, so
+// a read that fails or another session's line in between loses nothing.
+async function appendLine($: any, path: string, text: string): Promise<void> {
+  let present = true
+  try {
+    await $.fs.stat(path)
+  } catch {
+    present = false
+  }
+  if (!present) {
+    await $.fs.write(path, text)
+    return
+  }
+  const r = await $.process.run(['sh', '-c', 'cat >> "$1"', 'sh', path], { stdin: text, timeoutMs: 10_000 })
+  if (r.exitCode !== 0) throw new Error(r.stderr || 'the append exited ' + r.exitCode)
+}
+
 // One transcript line and one JSON line in the plugin's guard-warn.log.
 async function warnAct(
   $: any, act: Act, route: 'tool' | 'bash', repo: string, pr: number | string, head: string, missing: string[],
@@ -648,12 +666,6 @@ async function warnAct(
     const dir = await dataDir($)
     if (!dir) return
     const path = dir + '/' + WARN_LOG
-    let before = ''
-    try {
-      before = String(await $.fs.read(path))
-    } catch {
-      // A first line.
-    }
     let session = ''
     try {
       session = String(await $.session.id() ?? '')
@@ -661,7 +673,7 @@ async function warnAct(
       // Logged without it.
     }
     const line = { at: new Date().toISOString(), session, repo, pr, head, act: act.name, route, missing }
-    await $.fs.write(path, before + JSON.stringify(line) + '\n')
+    await appendLine($, path, JSON.stringify(line) + '\n')
   } catch {
     // The transcript line stands for it.
   }

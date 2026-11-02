@@ -9,6 +9,7 @@ const HEAD = '0123456789abcdef0123456789abcdef01234567'
 const MOVED = 'fedcba9876543210fedcba9876543210fedcba98'
 const RECORDS = '/cfg/pr-records'
 const HEAD_DIR = RECORDS + '/acme/thing/' + HEAD
+const WARN_LOG = '/data/guard-warn.log'
 
 let sessions = 0
 
@@ -31,11 +32,18 @@ type World = {
   bashResult?: any
   // What record.py answers when it fails: its exit code and stderr.
   recordFails?: { exitCode: number; stderr: string }
+  // guard-warn.log already there with this text, which $.fs cannot read back
+  // (a file past what one read copies): only an append keeps it.
+  warnLog?: string
   // The files and directories $.fs sees beside the records, by path.
   tree?: Record<string, { kind: 'file' | 'directory'; mtimeMs: number; text?: string }>
 }
 
-type Seen = { runs: any[]; asked: string[]; logs: string[]; writes: Array<{ path: string; text: string }>; bash: string[] }
+type Seen = {
+  runs: any[]; asked: string[]; logs: string[]; writes: Array<{ path: string; text: string }>; bash: string[]
+  // guard-warn.log's text as the disk holds it, when the world starts with one.
+  warnLog?: string
+}
 
 function record(kind: string, result: string, at = '2026-11-01T10:00:00Z', over: Record<string, unknown> = {}): [string, string] {
   const name = kind + '.' + at.replace(/[-:]/g, '') + '.p-' + kind + '.json'
@@ -53,7 +61,7 @@ function gateOf(w: World) {
 }
 
 async function world($: any, on: any, w: World = {}): Promise<Seen> {
-  const seen: Seen = { runs: [], asked: [], logs: [], writes: [], bash: [] }
+  const seen: Seen = { runs: [], asked: [], logs: [], writes: [], bash: [], warnLog: w.warnLog }
   const session = 'guard-session-' + ++sessions
   const records = w.records ?? FOUR
   const env: Record<string, string> = { CLAUDE_CONFIG_DIR: '/cfg', CLAUDE_PLUGIN_DATA: '/data', HOME: '/home/x' }
@@ -83,7 +91,9 @@ async function world($: any, on: any, w: World = {}): Promise<Seen> {
     return { value: undefined }
   })
   on('fs.exists', (_$: any, e: any) => ({ value: e.path in tree || (e.path === '/data/auto-merge.json' && w.autoMerge !== undefined) }))
-  on('fs.stat', (_$: any, e: any) => (e.path in tree ? { value: { kind: tree[e.path].kind, size: 0, mtimeMs: tree[e.path].mtimeMs, isLink: false } } : { deny: 'ENOENT ' + e.path }))
+  on('fs.stat', (_$: any, e: any) => (e.path === WARN_LOG && seen.warnLog !== undefined
+    ? { value: { kind: 'file', size: seen.warnLog.length, mtimeMs: 0, isLink: false } }
+    : e.path in tree ? { value: { kind: tree[e.path].kind, size: 0, mtimeMs: tree[e.path].mtimeMs, isLink: false } } : { deny: 'ENOENT ' + e.path }))
   on('fs.list', (_$: any, e: any) => {
     if (e.path === HEAD_DIR) {
       return { value: Object.keys(records).map((name) => ({ name, kind: 'file', size: 1, isLink: false })) }
@@ -102,9 +112,15 @@ async function world($: any, on: any, w: World = {}): Promise<Seen> {
   })
   on('fs.write', (_$: any, e: any) => {
     seen.writes.push({ path: e.path, text: e.text })
+    if (e.path === WARN_LOG && seen.warnLog !== undefined) seen.warnLog = e.text
     return { value: undefined }
   })
   on('process.run', (_$: any, e: any) => {
+    if (e.argv.includes(WARN_LOG)) {
+      seen.runs.push({ argv: e.argv })
+      if (seen.warnLog !== undefined && /cat >> /.test(e.argv.join(' '))) seen.warnLog += String(e.init?.stdin ?? '')
+      return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    }
     const stdin = JSON.parse(e.init?.stdin ?? '{}')
     seen.runs.push({ argv: e.argv, ...stdin })
     if (e.argv[0] === 'git') {
@@ -228,6 +244,17 @@ test('warn: the Ready label on a pull request not ready goes on with a warn line
   await $.tool.call(gh('pr-readiness', { pr: 12, state: 'not-ready' }))
   expect(seen.logs.length).toBe(2)
   expect(commands(seen)).toEqual(['pr-gate', 'pr-readiness', 'pr-gate', 'label-add', 'pr-readiness'])
+})
+
+test('warn: each warn line is appended to guard-warn.log, the lines before it kept', async ($, on) => {
+  const seen = await world($, on, { ...NO_RECORDS, autoMerge: ['acme/thing'], warnLog: '{"old":1}\n' })
+  await $.tool.call(gh('pr-merge', { pr: 12 }))
+  await $.tool.call(bash('gh pr merge 12 -R acme/thing --squash'))
+  const lines = String(seen.warnLog).trim().split('\n')
+  expect(lines.length).toBe(3)
+  expect(lines[0]).toBe('{"old":1}')
+  expect(JSON.parse(lines[1]).route).toBe('tool')
+  expect(JSON.parse(lines[2]).route).toBe('bash')
 })
 
 // ---- the tool, enforce phase ----
