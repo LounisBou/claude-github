@@ -99,7 +99,8 @@ never a distant link. A follow-up PR, one that must come after this one, is neve
 in Related PRs. State what ships first. `PRs Dependency` lists PRs that ship before,
 and two PRs never depend on each other. English always, with no
 semicolon. No workflow vocabulary. Every PR is opened as a draft (`pr-create
---draft`, the house default), and leaves draft only once it is ready. Outside
+--draft`, the house default), and leaves draft only once it is ready (see « Ready
+pull requests »). Outside
 auto-merge, leaving draft and merging also need the operator's explicit word, given
 through this tool, which asks him in the conversation. In a
 repository in auto-merge, the merge, leaving draft and the deployment its method
@@ -122,6 +123,25 @@ A pull request carries no change its purpose does not need: no reformatting, no
 renaming, no unrelated file. A refactor needed for the change to be clean and
 architecturally sound is part of it: it is done in a commit of its own and named in
 the description. A refactor unrelated to the purpose goes in its own pull request.
+
+## Ready pull requests
+
+Every pull request has its end-to-end tests, and they are merged with the ready PR.
+
+A pull request is ready when four things hold at its current head commit: a review ran
+there and came out clean, the norms check ran there and every finding is fixed or
+passed, its end-to-end tests ran there and passed (or the operator waived them in his
+own words, dated), and every CI check is green there. Ready belongs to one head: a new
+commit makes the pull request not ready until the four hold again at the new head.
+
+The `Ready` and `Not Ready` labels carry that fact on GitHub. A draft carries `Not
+Ready`. `Ready` is put only when the four hold, and leaving draft or merging needs the
+same four. When the CI does not run on a draft, the pull request leaves draft for it,
+still `Not Ready`, and goes back to draft once the CI is green, then takes `Ready`.
+A push to the pull request's branch puts `Not Ready` back. The plugin refuses `Ready`,
+leaving draft and a merge whose four conditions do not hold, through its tool and
+through the shell alike. The review, the norms check and the end-to-end run each leave
+a record at the head they read (see REFERENCE.md « Records »). CI is read from GitHub.
 
 ## Security update pull requests
 

@@ -10,6 +10,12 @@ import {
   WRITING_FILE, bashAuthoring, lineCount, normalise, printsWhole, readerKey, readsWhole, toolAuthoring,
   unreadRefusal,
 } from './guards.ts'
+import {
+  PRUNE_DAYS, PRUNE_EVERY_MS, RECORDS_REFUSAL, autoMergeRefusal, bashActs, bashPushes, carriesReady, ciUndraft,
+  ciUndraftLine, createdPr, draftRefusal, graphqlRefusal, missingItems, notReadyRefusal, parseGate, producerSlug,
+  recordKindFor, toolAct, touchesRecords, unnamedRepoRefusal, unverifiedRefusal, warnLine,
+  type Act, type Gate, type Phase, type RecordFile,
+} from './ready.ts'
 
 export const PANE_ID = 'github-prs'
 
@@ -17,14 +23,14 @@ export const PANE_ID = 'github-prs'
 // arguments (--stdin-json); tests/run-tests.sh fails when this list and the
 // engine's parser disagree.
 export const COMMANDS = [
-  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-diff', 'pr-files',
+  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-gate', 'pr-diff', 'pr-files',
   'pr-commits', 'file-at-ref', 'pr-create', 'pr-merge', 'pr-threads',
   'pr-comments', 'pr-issue-comments', 'pr-reviews', 'thread-reply',
   'pr-comment', 'comment-edit', 'comment-delete', 'thread-resolve',
   'comment-resolve', 'comment-unresolve', 'comment-resolved',
   'comments-resolved-batch', 'review-submit', 'review-pending-create',
   'review-pending-add', 'review-pending', 'repo-review-comments', 'pr-update',
-  'pr-ready', 'label-add', 'label-remove', 'reviewer-add', 'reviewer-remove',
+  'pr-ready', 'pr-draft', 'label-add', 'label-remove', 'reviewer-add', 'reviewer-remove',
   'assignee-add', 'assignee-remove', 'labels-ensure', 'pr-readiness', 'issue-view', 'issue-list',
   'issue-search', 'pr-linked-issues', 'image-upload', 'auth-check',
 ]
@@ -32,7 +38,7 @@ export const COMMANDS = [
 // The subcommands that only read. Every other one writes to GitHub, and a
 // command missing here is treated as a write, so the safe side is the default.
 export const READS = new Set([
-  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-diff', 'pr-files', 'pr-commits',
+  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-gate', 'pr-diff', 'pr-files', 'pr-commits',
   'file-at-ref', 'pr-threads', 'pr-comments', 'pr-issue-comments', 'pr-reviews',
   'comment-resolved', 'comments-resolved-batch', 'review-pending', 'repo-review-comments',
   'issue-view', 'issue-list', 'issue-search', 'pr-linked-issues', 'auth-check',
@@ -74,7 +80,9 @@ async function runGh(
  * approvals lift and an ask with no rule behind it runs. A deny and an ask
  * from an explicit rule stand, and so do the mechanical writing rules.
  */
-async function permit($: any, e: any): Promise<string | undefined> {
+async function permit(
+  $: any, e: any, beforeAsk?: () => Promise<string | undefined>, ciUndraft?: () => Promise<boolean>,
+): Promise<string | undefined> {
   const input = { command: e.command, args: e.args, repo: e.repo }
   const verdict = await $.tool.check({ tool: TOOL, input })
   if (verdict.decision === 'deny') return verdict.reason || 'refused by a permission rule'
@@ -82,6 +90,19 @@ async function permit($: any, e: any): Promise<string | undefined> {
 
   const unread = await writingUnread($, toolAuthoring(e.command, args), e.agentId)
   if (unread) return unread
+
+  // The ready guard, before any question: nobody is asked about a pull
+  // request that is not ready.
+  const notReady = beforeAsk ? await beforeAsk() : undefined
+  if (notReady) return notReady
+
+  // Going back to draft, and leaving it for CI still Not Ready, are no
+  // approvals to give: they run in every repository, as through Bash. An ask
+  // from an explicit rule stands.
+  if (e.command === 'pr-draft' || (ciUndraft && await ciUndraft())) {
+    if (verdict.decision === 'allow' || !verdict.rule) return undefined
+    return ask($, describe(e) + '?', ['Allow', 'Deny'], e.command)
+  }
 
   const found = lint(e.command, args, lastTyped)
   if (found.length > 0) {
@@ -251,11 +272,16 @@ const GITHUB_ORIGIN = /(?:git@github\.com:|https:\/\/github\.com\/)([^/]+)\/(.+?
 
 // The listed repositories, lowercased. An absent file lists none, and so does
 // an unreadable or malformed one, which also says so in one log line.
+// The plugin's data directory: the host's, else the one under HOME, else ''.
+async function dataDir($: any): Promise<string> {
+  const home = await $.env.get('HOME')
+  return (await $.env.get('CLAUDE_PLUGIN_DATA')) || (home ? home + DATA_UNDER_HOME : '')
+}
+
 async function autoMergeRepos($: any): Promise<Set<string>> {
   let path = ''
   try {
-    const home = await $.env.get('HOME')
-    const dir = (await $.env.get('CLAUDE_PLUGIN_DATA')) || (home ? home + DATA_UNDER_HOME : '')
+    const dir = await dataDir($)
     if (!dir) return new Set()
     path = dir + '/' + AUTO_MERGE_FILE
     if (!(await $.fs.exists(path))) return new Set()
@@ -273,7 +299,19 @@ async function autoMergeRepos($: any): Promise<Set<string>> {
 // The repository the engine will act on, in its own order. The call's repo is
 // passed last as --repo=, so it wins over a repo in its args even when empty;
 // an empty or absent one falls through to GH_REPO, then to the checkout's origin.
-async function targetRepo($: any, e: any): Promise<string | undefined> {
+// Read once per call: the ready guard and the auto-merge check ask for it both.
+const targets = new WeakMap<object, Promise<string | undefined>>()
+
+function targetRepo($: any, e: any): Promise<string | undefined> {
+  let found = targets.get(e)
+  if (!found) {
+    found = readTargetRepo($, e)
+    targets.set(e, found)
+  }
+  return found
+}
+
+async function readTargetRepo($: any, e: any): Promise<string | undefined> {
   const override = e.repo !== undefined && e.repo !== null ? e.repo : e.args?.repo
   for (const named of [override, await $.env.get('GH_REPO')]) {
     if (named !== undefined && named !== null && String(named) !== '') return String(named)
@@ -502,6 +540,481 @@ export async function diagnose($: any, check = false): Promise<string> {
   return out + '\n\nExit code ' + r.exitCode + ': ' + meaning + '.'
 }
 
+// ---- the ready guard and the auto-merge split ----
+
+/*
+ * A pull request is ready when a clean review, a passed norms check, passed
+ * E2E and green CI all stand at its current head (engine/WRITING.md « Ready
+ * pull requests »). Marking it Ready, taking it out of draft and merging it
+ * need the four, through the tool and through Bash alike. Under the warn
+ * phase an act that is not ready goes ahead with one warn line, under the
+ * enforce phase it is refused. Through Bash a merge or leaving draft in a
+ * repository not in auto-merge is refused in both: the tool asks the person.
+ * A pull request that carries Not Ready and whose CI is not green may leave
+ * draft for its CI to run, still Not Ready, in every repository.
+ */
+
+// The phase this release ships with.
+export const READY_PHASE: Phase = 'warn'
+// Set to 1 in the environment, it brings the enforce phase forward. It only
+// ever tightens: no variable turns a release's enforce phase back to warn.
+export const ENFORCE_ENV = 'CLAUDE_GITHUB_READY_ENFORCE'
+
+async function phaseOf($: any): Promise<Phase> {
+  if (READY_PHASE === 'enforce') return 'enforce'
+  try {
+    return (await $.env.get('CLAUDE_GITHUB_READY_ENFORCE')) === '1' ? 'enforce' : 'warn'
+  } catch {
+    return READY_PHASE
+  }
+}
+
+export const RECORD_TOOL = 'mcp__github__record'
+export const WARN_LOG = 'guard-warn.log'
+
+// A line in the transcript that never fails what it reports on.
+function note($: any, text: string): void {
+  try {
+    const sent = $.ui.log(text)
+    if (sent && typeof sent.catch === 'function') sent.catch(() => undefined)
+  } catch {
+    // Nowhere to say it: the act it notes is not held for that.
+  }
+}
+
+async function configDir($: any): Promise<string | undefined> {
+  const named = await $.env.get('CLAUDE_CONFIG_DIR')
+  if (named) return String(named)
+  const home = await $.env.get('HOME')
+  return home ? home + '/.claude' : undefined
+}
+
+// ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pr-records, or undefined when unreadable.
+async function recordsRoot($: any): Promise<string | undefined> {
+  try {
+    const dir = await configDir($)
+    return dir ? dir + '/pr-records' : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// The records of a pull request's head, as files. A directory that cannot be
+// listed holds none, a file that cannot be read is one that does not parse.
+async function headRecords($: any, gate: Gate): Promise<RecordFile[]> {
+  const root = await recordsRoot($)
+  if (!root) return []
+  const dir = root + '/' + gate.repo.toLowerCase() + '/' + gate.head
+  let entries: any[]
+  try {
+    entries = await $.fs.list(dir)
+  } catch {
+    return []
+  }
+  const files: RecordFile[] = []
+  for (const entry of entries) {
+    const name = String(entry?.name ?? '')
+    if (entry?.kind === 'directory' || name.startsWith('.') || !name.endsWith('.json')) continue
+    let text = ''
+    try {
+      text = String(await $.fs.read(dir + '/' + name))
+    } catch {
+      // Left empty: it is named as unreadable.
+    }
+    files.push({ name, text })
+  }
+  return files
+}
+
+type Readiness = { gate?: Gate; missing: string[]; error?: string }
+
+// What a pull request misses at its head, read from GitHub and the records.
+async function readiness($: any, repo: string, pr: number, sha?: string): Promise<Readiness> {
+  let gate: Gate
+  try {
+    gate = parseGate(await runGh($, 'pr-gate', { pr }, repo))
+  } catch (err: any) {
+    return { missing: [], error: String(err?.message ?? err).trim() }
+  }
+  return { gate, missing: missingItems(gate, await headRecords($, gate), sha) }
+}
+
+// A line added at the end of a file, the file created when absent. $.fs only
+// rewrites a file whole: a file already there is appended to by the shell, so
+// a read that fails or another session's line in between loses nothing.
+async function appendLine($: any, path: string, text: string): Promise<void> {
+  let present = true
+  try {
+    await $.fs.stat(path)
+  } catch {
+    present = false
+  }
+  if (!present) {
+    await $.fs.write(path, text)
+    return
+  }
+  const r = await $.process.run(['sh', '-c', 'cat >> "$1"', 'sh', path], { stdin: text, timeoutMs: 10_000 })
+  if (r.exitCode !== 0) throw new Error(r.stderr || 'the append exited ' + r.exitCode)
+}
+
+// One transcript line and one JSON line in the plugin's guard-warn.log.
+async function warnAct(
+  $: any, act: Act, route: 'tool' | 'bash', repo: string, pr: number | string, head: string, missing: string[],
+): Promise<void> {
+  note($, warnLine(act.name, repo, pr, missing))
+  try {
+    const dir = await dataDir($)
+    if (!dir) return
+    const path = dir + '/' + WARN_LOG
+    let session = ''
+    try {
+      session = String(await $.session.id() ?? '')
+    } catch {
+      // Logged without it.
+    }
+    const line = { at: new Date().toISOString(), session, repo, pr, head, act: act.name, route, missing }
+    await appendLine($, path, JSON.stringify(line) + '\n')
+  } catch {
+    // The transcript line stands for it.
+  }
+}
+
+async function labelNotReady($: any, repo: string, pr: number): Promise<void> {
+  await runGh($, 'pr-readiness', { pr, state: 'not-ready' }, repo)
+}
+
+// The number of the open pull request of a branch, the current one when none
+// is named, or undefined.
+async function prOfBranch($: any, repo: string, branch?: string): Promise<number | undefined> {
+  const pulls = JSON.parse(await runGh($, 'pr-get', branch ? { branch } : {}, repo))
+  const pull = Array.isArray(pulls) ? pulls.find((p: any) => p && p.number) : undefined
+  return pull ? Number(pull.number) : undefined
+}
+
+// The enforce phase's refusal, which also takes Ready off a pull request
+// that still carries it, so the label never claims what the guard refused.
+async function refuseNotReady($: any, act: Act, repo: string, pr: number, r: Readiness): Promise<string> {
+  const gate = r.gate as Gate
+  if (carriesReady(gate)) {
+    try {
+      await labelNotReady($, repo, pr)
+    } catch (err: any) {
+      note($, 'github: ' + repo + '#' + pr + ' keeps Ready, the label could not be changed: ' + String(err?.message ?? err))
+    }
+  }
+  return notReadyRefusal(act.name, repo, pr, gate.head, r.missing)
+}
+
+// The Bash ready guard failed on its own: under warn the command goes on with
+// a warn line, under enforce it is refused as a readiness that could not be read.
+async function guardThrew($: any, act: Act | undefined, err: any): Promise<string | undefined> {
+  const error = String(err?.message ?? err).trim()
+  if (await phaseOf($) === 'enforce') return unverifiedRefusal(act?.repo, act?.pr, error)
+  const named: Act = act ?? { kind: 'merge', name: 'the command' }
+  await warnAct($, named, 'bash', act?.repo ?? '?', act?.pr ?? '?', '', ['readiness unverified: ' + error])
+  return undefined
+}
+
+// The tool's act: checked before any question under enforce, and once it goes
+// ahead under warn. A CI undraft runs as pr-ready --for-ci, which keeps Not Ready.
+function toolReady($: any, e: any, act: Act) {
+  let read: Readiness | undefined
+  let forCi = false
+  const repoPr = async (): Promise<{ repo?: string; pr?: number }> => {
+    let repo: string | undefined
+    try {
+      repo = await targetRepo($, e)
+    } catch {
+      repo = undefined
+    }
+    return { repo, pr: act.pr !== undefined && Number.isFinite(act.pr) ? act.pr : undefined }
+  }
+  // undefined when the act may go on; else what it misses, or why that is unknown.
+  const evaluate = async (): Promise<{ repo: string; pr: number | string; r: Readiness } | undefined> => {
+    const { repo, pr } = await repoPr()
+    if (!repo || pr === undefined) {
+      return { repo: repo ?? 'the origin repository', pr: pr ?? '?', r: { missing: [], error: 'no repository or pull request named' } }
+    }
+    try {
+      read = read ?? await readiness($, repo, pr, act.sha)
+      if (act.kind === 'undraft' && read.gate && ciUndraft(read.gate)) {
+        forCi = true
+        e.args = { ...e.args, 'for-ci': true }
+        return undefined
+      }
+    } catch (err: any) {
+      // The guard's own failure reads as a readiness that could not be read.
+      read = { missing: [], error: String(err?.message ?? err).trim() }
+    }
+    if (read.error || read.missing.length > 0) return { repo, pr, r: read }
+    return undefined
+  }
+  const gated = act.kind === 'merge' || act.kind === 'undraft' || act.kind === 'ready-label'
+  return {
+    async beforeAsk(): Promise<string | undefined> {
+      if (await phaseOf($) !== 'enforce') return undefined
+      if (act.kind === 'create') return draftRefusal(act.name)
+      if (!gated) return undefined
+      const found = await evaluate()
+      if (!found) return undefined
+      if (found.r.error) return unverifiedRefusal(found.repo, found.pr, found.r.error)
+      try {
+        return await refuseNotReady($, act, found.repo, Number(found.pr), found.r)
+      } catch (err: any) {
+        return unverifiedRefusal(found.repo, found.pr, String(err?.message ?? err).trim())
+      }
+    },
+    // Whether this is an undraft for CI, read in both phases.
+    async ciUndraft(): Promise<boolean> {
+      if (act.kind !== 'undraft') return false
+      await evaluate()
+      return forCi
+    },
+    async goingAhead(): Promise<void> {
+      if (await phaseOf($) !== 'warn') return
+      if (act.kind === 'create') {
+        const { repo } = await repoPr()
+        await warnAct($, act, 'tool', repo ?? 'the origin repository', '?', '', ['opened out of draft'])
+        return
+      }
+      if (!gated) return
+      const found = await evaluate()
+      if (!found) return
+      const missing = found.r.error ? ['readiness unverified: ' + found.r.error] : found.r.missing
+      await warnAct($, act, 'tool', found.repo, found.pr, found.r.gate?.head ?? '', missing)
+    },
+    async ran(): Promise<void> {
+      if (!forCi) return
+      const { repo, pr } = await repoPr()
+      if (repo && pr !== undefined) note($, ciUndraftLine(repo, pr))
+    },
+  }
+}
+
+// The Bash act's refusal, or undefined; what must follow its success goes in after.
+async function bashReady($: any, act: Act, after: Array<(result: any) => Promise<void>>): Promise<string | undefined> {
+  const readyPhase = await phaseOf($)
+  if (act.kind === 'create') {
+    if (readyPhase === 'enforce') return draftRefusal(act.name)
+    await warnAct($, act, 'bash', act.repo ?? '?', '?', '', ['opened out of draft'])
+    return undefined
+  }
+  if (act.kind === 'create-draft') {
+    after.push(async (result) => {
+      const made = createdPr(stdoutOf(result))
+      if (made) await labelNotReady($, made.repo, made.pr)
+      else note($, 'github: the new draft keeps its labels: gh pr create printed no pull request URL')
+    })
+    return undefined
+  }
+  if (act.kind === 'redraft') {
+    after.push(async () => {
+      const pr = act.repo ? act.pr ?? await prOfBranch($, act.repo, act.branch) : undefined
+      if (act.repo && pr !== undefined) await labelNotReady($, act.repo, pr)
+      else note($, 'github: the pull request back in draft keeps its labels: name it with -R owner/name and its number')
+    })
+    return undefined
+  }
+  if (act.unnamed) return graphqlRefusal(act.kind)
+  if (!act.repo) {
+    // A merge or leaving draft is refused in both phases, as the auto-merge
+    // split needs the repository. The Ready label is the ready guard's alone.
+    if (act.kind !== 'ready-label' || readyPhase === 'enforce') return unnamedRepoRefusal(act.name)
+    await warnAct($, act, 'bash', '?', act.pr ?? '?', '', ['readiness unverified: the command names no repository'])
+    return undefined
+  }
+  const repo = act.repo
+  const listed = act.kind === 'ready-label' ? false : (await autoMergeRepos($)).has(repo.toLowerCase())
+  if (act.kind === 'merge' && !listed) return autoMergeRefusal('merge', repo, act.pr)
+  let pr = act.pr
+  let lookup = ''
+  if (pr === undefined) {
+    try {
+      pr = await prOfBranch($, repo, act.branch)
+      if (pr === undefined) lookup = 'no open pull request for ' + (act.branch ?? 'the current branch')
+    } catch (err: any) {
+      lookup = String(err?.message ?? err).trim()
+    }
+  }
+  const r: Readiness = pr === undefined ? { missing: [], error: lookup } : await readiness($, repo, pr, act.sha)
+  if (act.kind === 'undraft') {
+    if (r.gate && ciUndraft(r.gate) && pr !== undefined) {
+      const n = pr
+      after.push(async () => note($, ciUndraftLine(repo, n)))
+      return undefined
+    }
+    if (!listed) return autoMergeRefusal('undraft', repo, pr)
+  }
+  const shown = pr ?? '?'
+  if (r.error) {
+    if (readyPhase === 'enforce') return unverifiedRefusal(repo, shown, r.error)
+    await warnAct($, act, 'bash', repo, shown, '', ['readiness unverified: ' + r.error])
+    return undefined
+  }
+  if (r.missing.length > 0) {
+    if (readyPhase === 'enforce') return refuseNotReady($, act, repo, Number(pr), r)
+    await warnAct($, act, 'bash', repo, shown, r.gate?.head ?? '', r.missing)
+  }
+  return undefined
+}
+
+function stdoutOf(result: any): string {
+  const out = result?.result
+  if (typeof out === 'string') return out
+  return String(out?.stdout ?? '')
+}
+
+// A push moves the head of the branches it names: a pull request of theirs
+// that carries Ready goes back to Not Ready. A branch or a repository read
+// with any doubt is left alone, with one line saying so.
+async function followPushes($: any, line: string): Promise<void> {
+  const { pushes, moves } = bashPushes(line)
+  for (const push of pushes) {
+    try {
+      const byUrl = push.remote !== undefined && GITHUB_ORIGIN.test(push.remote)
+      if (push.unsure || (moves && (push.current !== undefined || !byUrl))) {
+        note($, 'github: the labels are left as they are after the push: ' + (push.unsure ?? 'the command changes directory first'))
+        continue
+      }
+      let remote = push.remote
+      const branches = [...push.branches]
+      if (push.current === 'upstream') {
+        const r = await $.process.run(['git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { timeoutMs: 10_000 })
+        const upstream = r.exitCode === 0 ? String(r.stdout).trim() : ''
+        const slash = upstream.indexOf('/')
+        if (slash <= 0) {
+          note($, 'github: the labels are left as they are after the push: the current branch has no upstream')
+          continue
+        }
+        remote = upstream.slice(0, slash)
+        branches.push(upstream.slice(slash + 1))
+      } else if (push.current === 'branch') {
+        const r = await $.process.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 })
+        const branch = r.exitCode === 0 ? String(r.stdout).trim() : ''
+        if (!branch || branch === 'HEAD') {
+          note($, 'github: the labels are left as they are after the push: the current branch cannot be read')
+          continue
+        }
+        branches.push(branch)
+      }
+      let url = remote ?? ''
+      if (!GITHUB_ORIGIN.test(url)) {
+        const r = await $.process.run(['git', 'remote', 'get-url', url], { timeoutMs: 10_000 })
+        url = r.exitCode === 0 ? String(r.stdout).trim() : ''
+      }
+      const match = GITHUB_ORIGIN.exec(url)
+      if (!match) {
+        note($, 'github: the labels are left as they are after the push: ' + (remote ?? 'its remote') + ' is no GitHub repository')
+        continue
+      }
+      const repo = match[1] + '/' + match[2]
+      for (const branch of branches) {
+        const pulls = JSON.parse(await runGh($, 'pr-get', { branch }, repo))
+        for (const pull of Array.isArray(pulls) ? pulls : []) {
+          const labels = (pull?.labels ?? []).map((l: any) => String(l?.name ?? l).toLowerCase())
+          if (!labels.includes('ready')) continue
+          await labelNotReady($, repo, Number(pull.number))
+          note($, 'github: ' + repo + '#' + pull.number + ' back to Not Ready after the push to ' + branch)
+        }
+      }
+    } catch (err: any) {
+      note($, 'github: the labels could not be read after the push: ' + String(err?.message ?? err))
+    }
+  }
+}
+
+// ---- records ----
+
+// The prompts the person typed in this session, at the terminal or through
+// the bridge: an E2E waiver quotes one of them.
+const typedPrompts: string[] = []
+const TYPED_KEPT = 200
+
+function typedVerbatim(text: string): boolean {
+  return text.trim() !== '' && typedPrompts.some((prompt) => prompt.includes(text))
+}
+
+async function writeRecord($: any, e: any, origin: string): Promise<{ result?: string; deny?: string; isError?: boolean }> {
+  const verdict = await $.tool.check({ tool: RECORD_TOOL, input: { pr: e.pr, repo: e.repo, kind: e.kind, result: e.result, detail: e.detail } })
+  if (verdict.decision === 'deny') return { deny: verdict.reason || 'refused by a permission rule' }
+  const owned = recordKindFor(origin)
+  const kind = e.kind === undefined || e.kind === null || e.kind === '' ? owned : String(e.kind)
+  if (kind !== owned) {
+    return {
+      deny: 'github: ' + kind + ' records are written by their producer (claude-review\'s auto-fix-loop for review,'
+        + ' /norms:check for norms): ' + (origin === 'engine' ? 'this tool' : origin) + ' writes ' + owned + ' only.',
+    }
+  }
+  const result = String(e.result ?? '')
+  const detail = e.detail === undefined || e.detail === null ? '' : String(e.detail)
+  if (result === 'waived' && !typedVerbatim(detail)) {
+    return { deny: 'github: an E2E waiver quotes the operator: its detail must be words he typed in this session, with their date.' }
+  }
+  const pr = Number(String(e.pr ?? '').replace('#', ''))
+  if (!Number.isInteger(pr) || pr < 1) return { deny: 'github: name the pull request: {"pr": <n>}' }
+  const repo = await targetRepo($, { repo: e.repo, args: {} })
+  if (!repo) return { deny: 'github: name the repository: {"repo": "owner/name"}' }
+  let gate: Gate
+  try {
+    gate = parseGate(await runGh($, 'pr-gate', { pr }, repo))
+  } catch (err: any) {
+    return { deny: unverifiedRefusal(repo, pr, String(err?.message ?? err).trim()) }
+  }
+  const head = await $.process.run(['git', 'rev-parse', 'HEAD'], { timeoutMs: 10_000 })
+  const local = head.exitCode === 0 ? String(head.stdout).trim().toLowerCase() : ''
+  if (local !== gate.head) {
+    return { deny: 'github: the checkout is at ' + (local.slice(0, 7) || 'no commit') + ', the pull request\'s head is ' + gate.head.slice(0, 7) + ': a record is written at the head it read.' }
+  }
+  const status = await $.process.run(['git', 'status', '--porcelain', '-uno'], { timeoutMs: 10_000 })
+  if (status.exitCode !== 0 || String(status.stdout).trim() !== '') {
+    return { deny: 'github: the tracked files have changes: a record is written on a clean checkout of the head.' }
+  }
+  let session = ''
+  try {
+    session = String(await $.session.id() ?? '')
+  } catch {
+    // Written without it.
+  }
+  const argv = [
+    'python3', $.plugin.root + '/engine/record.py', '--repo', repo, '--pr', String(pr), '--head', gate.head,
+    '--kind', kind, '--result', result, '--producer', producerSlug(origin), '--detail', detail, '--session', session,
+  ]
+  const run = await $.process.run(argv, { timeoutMs: 30_000 })
+  if (run.exitCode !== 0) return { result: String(run.stderr || 'record.py exited ' + run.exitCode).trim(), isError: true }
+  return { result: String(run.stdout).trim() }
+}
+
+// At most once a day, the head directories whose newest record is older than
+// PRUNE_DAYS go: their pull request merged or moved on long ago.
+async function pruneRecords($: any): Promise<void> {
+  const root = await recordsRoot($)
+  if (!root || !(await $.fs.exists(root))) return
+  const stamp = root + '/.pruned'
+  try {
+    const last = await $.fs.stat(stamp)
+    if (Date.now() - Number(last.mtimeMs) < PRUNE_EVERY_MS) return
+  } catch {
+    // Never pruned.
+  }
+  const cut = Date.now() - PRUNE_DAYS * 24 * 3600 * 1000
+  const dirs = async (path: string): Promise<string[]> =>
+    (await $.fs.list(path)).filter((x: any) => x?.kind === 'directory').map((x: any) => path + '/' + x.name)
+  const stale: string[] = []
+  for (const owner of await dirs(root)) {
+    for (const name of await dirs(owner)) {
+      for (const head of await dirs(name)) {
+        let newest = Number((await $.fs.stat(head)).mtimeMs)
+        for (const file of await $.fs.list(head)) {
+          newest = Math.max(newest, Number((await $.fs.stat(head + '/' + file.name)).mtimeMs))
+        }
+        if (newest < cut) stale.push(head)
+      }
+    }
+  }
+  if (stale.length > 0) await $.process.run(['rm', '-rf', '--', ...stale], { timeoutMs: 60_000 })
+  await $.fs.write(stamp, new Date().toISOString() + '\n')
+}
+
 export function register(on: any): void {
   on('session.start', async ($: any, e: any, next: any) => {
     const root = $.plugin.root
@@ -530,6 +1043,37 @@ export function register(on: any): void {
         required: ['command'],
       },
     })
+    // Apart from the gh tool: a failure here leaves it and the commands registered.
+    try {
+      await $.tool.register({
+        name: 'record',
+        isDeferred: false,
+        description:
+          'Record the end-to-end tests of a pull request at its head commit: pass, fail, or waived by '
+          + 'the operator in his own words. Run from a clean checkout at the pull request\'s head, after '
+          + 'the tests ran there. A waiver\'s detail quotes words he typed in this session, with their date '
+          + '(YYYY-MM-DD). Reviews and norms checks are recorded by their own tools. See '
+          + root + '/engine/REFERENCE.md « Records ».',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            pr: { type: 'integer', description: 'the pull request number' },
+            repo: { type: 'string', description: 'owner/name, overriding origin' },
+            result: { type: 'string', enum: ['pass', 'fail', 'waived'] },
+            detail: { type: 'string', description: 'what ran, or the operator\'s waiver with its date' },
+            kind: { type: 'string', enum: ['review', 'norms', 'e2e'], description: 'default: the kind this caller writes' },
+          },
+          required: ['pr', 'result'],
+        },
+      })
+    } catch (err: any) {
+      note($, 'github: the record tool could not be registered: ' + String(err?.message ?? err))
+    }
+    try {
+      await pruneRecords($)
+    } catch (err: any) {
+      note($, 'github: the old records could not be pruned: ' + String(err?.message ?? err))
+    }
     ownedCommands.clear()
     // Commands last: a taken name throws and would skip the rest of the hook.
     for (const spec of [
@@ -549,11 +1093,20 @@ export function register(on: any): void {
 
   on('prompt.submit', async (_$: any, e: any, next: any) => {
     const kind = String(e.origin?.kind ?? '')
-    if (kind === 'composer' || kind === 'bridge') lastTyped = String(e.text ?? '')
+    if (kind === 'composer' || kind === 'bridge') {
+      lastTyped = String(e.text ?? '')
+      typedPrompts.push(lastTyped)
+      if (typedPrompts.length > TYPED_KEPT) typedPrompts.shift()
+    }
     return next(e)
   }).catch(async (_$: any, e: any, next: any) => next(e))
 
   on('tool.call', { tool: 'Bash' }, async ($: any, e: any, next: any) => {
+    try {
+      if (touchesRecords(String(e.command), await recordsRoot($))) return { deny: RECORDS_REFUSAL }
+    } catch {
+      // A command that is no text names no record either.
+    }
     let command: string | undefined
     try {
       command = bashAuthoring(e.command)
@@ -563,6 +1116,19 @@ export function register(on: any): void {
     }
     const unread = await writingUnread($, command, e.agentId)
     if (unread) return { deny: unread }
+    const after: Array<(result: any) => Promise<void>> = []
+    let current: Act | undefined
+    try {
+      for (const act of bashActs(String(e.command))) {
+        current = act
+        const refused = await bashReady($, act, after)
+        if (refused) return { deny: refused }
+      }
+    } catch (err) {
+      // The ready guard failed on its own: its readiness reads as unverified, never as a pass.
+      const refused = await guardThrew($, current, err)
+      if (refused) return { deny: refused }
+    }
     const result = await next(e)
     try {
       const printed = printsWhole(e.command)
@@ -572,8 +1138,38 @@ export function register(on: any): void {
     } catch (err) {
       await markFailed($, err, e.agentId)
     }
+    if (!failed(result)) {
+      for (const then of after) {
+        try {
+          await then(result)
+        } catch (err: any) {
+          note($, 'github: the label could not be set after the command: ' + String(err?.message ?? err))
+        }
+      }
+      await followPushes($, String(e.command))
+    }
     return result
   }).catch(async (_$: any, e: any, next: any) => next(e))
+
+  // The records are written by their producers only.
+  for (const tool of ['Write', 'Edit', 'MultiEdit']) {
+    on('tool.call', { tool }, async ($: any, e: any, next: any) => {
+      const root = await recordsRoot($)
+      const path = normalise(String(e.file_path ?? ''), String(await $.session.cwd()))
+      if ((root && (path === root || path.startsWith(root + '/'))) || path.includes('/.claude/pr-records/')) {
+        return { deny: RECORDS_REFUSAL }
+      }
+      return next(e)
+    }).catch(async (_$: any, e: any, next: any) => next(e))
+  }
+
+  on('tool.call', { tool: RECORD_TOOL }, async ($: any, e: any, next: any) => {
+    try {
+      return await writeRecord($, e, String(next?.origin?.plugin ?? 'engine'))
+    } catch (err: any) {
+      return { result: String(err?.message ?? err), isError: true }
+    }
+  }).catch(async () => ({ deny: 'github mod error: the record hook itself failed' }))
 
   on('tool.call', { tool: 'Read' }, async ($: any, e: any, next: any) => {
     const result = await next(e)
@@ -606,10 +1202,14 @@ export function register(on: any): void {
 
   on('tool.call', { tool: TOOL }, async ($: any, raw: any) => {
     const e = { ...raw, args: withHouseDefaults(raw.command, raw.args ?? {}) }
-    const refused = await permit($, e)
+    const act = toolAct(e.command, e.args)
+    const ready = act ? toolReady($, e, act) : undefined
+    const refused = await permit($, e, ready?.beforeAsk, ready?.ciUndraft)
     if (refused) return { deny: refused }
+    if (ready) await ready.goingAhead()
     try {
       const result = await runGh($, e.command, e.args, e.repo, true) || '(no output)'
+      if (ready) await ready.ran()
       // A write changes what the open pane shows: read it again, unawaited.
       if (watch && !READS.has(e.command)) void refresh($)
       return { result }

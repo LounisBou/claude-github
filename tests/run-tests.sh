@@ -1077,9 +1077,9 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.11.0" \
+check "manifest version" "0.12.0" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.11.0 0.11.0" \
+check "marketplace version matches" "0.12.0 0.12.0" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
@@ -1158,7 +1158,7 @@ print(" | ".join(found))
 PYHEAD
 )
 check "WRITING.md headings are in order" \
-  "Commit messages | Pull request titles | References to pull requests and issues | Pull request descriptions | Security update pull requests | Review comments" \
+  "Commit messages | Pull request titles | References to pull requests and issues | Pull request descriptions | Ready pull requests | Security update pull requests | Review comments" \
   "$headings"
 
 check "REFERENCE.md points at WRITING.md" "1" \
@@ -1167,6 +1167,11 @@ check "REFERENCE.md points at WRITING.md" "1" \
 for needle in '--draft' '**TODO Staging:**' '**TODO Prod:**' '**PRs Dependency:**' '**Related PRs:**' 'TODO Staging or TODO Prod item is a task-list checkbox' 'A TODO item stands alone' '"do the same edit"' 'the value before and after' 'checkbox, one action' 'never joined by "then" or "and run"' 'follow-up' 'mandatory' 'kept apart' 'no semicolon' 'published and edited without asking' 'heading' '| Advisory |' 'locked at' 'one table per advisory' 'is a markdown link to its advisory'; do
   check "WRITING.md mentions '$needle'" "1" \
     "$(grep -qF -- "$needle" "$WRITINGDOC" && echo 1 || echo 0)"
+done
+
+for needle in 'leaves draft only once it is ready (see « Ready' 'A pull request is ready when four things hold at its current head commit' 'Ready belongs to one head' 'A push to the pull request'"'"'s branch puts `Not Ready` back' 'see REFERENCE.md « Records »' 'When the CI does not run on a draft, the pull request leaves draft for it,' 'goes back to draft once the CI is green, then takes `Ready`' 'CI is read from GitHub'; do
+  check "WRITING.md Ready pull requests mentions '$needle'" "1" \
+    "$(python3 -c 'import sys; print(1 if sys.argv[1] in open(sys.argv[2], encoding="utf-8").read() else 0)' "$needle" "$WRITINGDOC")"
 done
 
 titles_concise=$(python3 - "$WRITINGDOC" <<'PYTITLES'
@@ -1487,12 +1492,23 @@ check "no attribution trailers in history" "0" \
 # minus this test suite itself -- a developer-only harness, never installed
 # or read as part of using the plugin, and the one file guaranteed to spell
 # out the search string in its own source.
+#
+# Two narrow exceptions. The hooks test files (hooks/*.test.ts) are
+# developer-only like this suite, and spell out the name to prove the record
+# tool tells the review's plugin apart. The one line of hooks/ready.ts that
+# defines REVIEW_PLUGIN carries the name the host installs claude-review
+# under, which is what a hook call's origin reports; every other line still
+# counts, so a refusal text or a doc naming the old plugin still fails here.
 old_name_hits=""
 for f in $(cd "$ROOT" && git ls-files); do
   case "$f" in
     tests/run-tests.sh) continue ;;
+    hooks/*.test.ts) continue ;;
   esac
   hit=$(grep -inE 'pr-review([^s]|$)' "$ROOT/$f" 2>/dev/null || true)
+  if [ "$f" = hooks/ready.ts ]; then
+    hit=$(printf '%s\n' "$hit" | grep -vE "^[0-9]+:export const REVIEW_PLUGIN = 'pr-review'$" || true)
+  fi
   if [ -n "$hit" ]; then
     old_name_hits="$old_name_hits
 $f: $hit"
@@ -1813,6 +1829,151 @@ check "stdin json maps pr-readiness positionals by name" \
   "$(argv6 '{"command":"pr-readiness","args":{"pr":12,"state":"not-ready"}}')"
 check "stdin json accepts labels-ensure with no positional" \
   "labels-ensure" "$(argv6 '{"command":"labels-ensure"}')"
+
+echo "== readiness reads =="
+
+GATEHEAD=89abcdef0123456789abcdef0123456789abcdef
+# gate8 <scenario> <pull json> <combined status json> <check runs json>: one
+# fixture directory with the three reads pr-gate makes.
+gate8() {
+  F8="$WORK/fix8-$1"; rm -rf "$F8"; mkdir -p "$F8"
+  printf '%s' "$2" > "$F8/GET_repos_acme_thing_pulls_12.json"
+  printf '%s' "$3" > "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_status.json"
+  printf '%s' "$4" > "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_check-runs__per_page=100.json"
+}
+gh8() { env GH_FIXTURES="$F8" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
+ci8() { gh8 pr-gate 12 | python3 -c 'import json,sys; c=json.load(sys.stdin)["ci"]; print(c["result"], ",".join(c["failed"]), ",".join(c["skipped"]), c["total"])'; }
+PULL8='{"number":12,"state":"open","draft":false,"head":{"sha":"'$GATEHEAD'","ref":"feat"},"labels":[{"name":"Not Ready"},{"name":"bug"}]}'
+
+gate8 shape "$PULL8" '{"state":"success","statuses":[{"context":"ci/legacy","state":"success"}]}' '{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"success"}]}'
+check "pr-gate answers repo, pr, state, draft, head, labels and ci" \
+  "acme/thing 12 open False $GATEHEAD Not Ready|bug SUCCESS 2" \
+  "$(gh8 pr-gate 12 | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["repo"], d["pr"], d["state"], d["draft"], d["head"], "|".join(d["labels"]), d["ci"]["result"], d["ci"]["total"])')"
+check "pr-gate makes three reads, the check runs a full page" \
+  "GET /repos/acme/thing/pulls/12|GET /repos/acme/thing/commits/$GATEHEAD/status|GET /repos/acme/thing/commits/$GATEHEAD/check-runs?per_page=100" \
+  "$(python3 -c 'import json,sys; print("|".join(json.loads(l)["method"] + " " + json.loads(l)["path"] for l in open(sys.argv[1])))' "$F8/sent.jsonl")"
+
+gate8 none "$PULL8" '{"state":"pending","statuses":[]}' '{"total_count":0,"check_runs":[]}'
+check "pr-gate reads no check at all as green, total 0" "SUCCESS   0" "$(ci8)"
+
+gate8 failed "$PULL8" '{"state":"failure","statuses":[{"context":"ci/legacy","state":"error"}]}' '{"check_runs":[{"name":"lint","status":"completed","conclusion":"failure"},{"name":"test","status":"completed","conclusion":"success"}]}'
+check "pr-gate names the failed checks and statuses" "FAILURE lint,ci/legacy  3" "$(ci8)"
+
+gate8 running "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"test","status":"in_progress","conclusion":null}]}'
+check "pr-gate reads a running check as pending" "PENDING   1" "$(ci8)"
+
+gate8 skipped "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"test","status":"completed","conclusion":"skipped"},{"name":"lint","status":"completed","conclusion":"success"}]}'
+check "pr-gate never reads a skipped check as green" "PENDING  test 2" "$(ci8)"
+
+gate8 neutral-open "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}'
+check "pr-gate reads a neutral check out of draft as green" "SUCCESS   1" "$(ci8)"
+
+gate8 neutral-draft "$(printf '%s' "$PULL8" | sed 's/"draft":false/"draft":true/')" '{"statuses":[]}' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}'
+check "pr-gate never reads a neutral check on a draft as green" "PENDING  scan 1" "$(ci8)"
+
+gate8 startup "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"build","status":"completed","conclusion":"startup_failure"},{"name":"lint","status":"completed","conclusion":"success"}]}'
+check "pr-gate reads a check that failed to start as failed" "FAILURE build  2" "$(ci8)"
+
+gate8 merged "$(printf '%s' "$PULL8" | sed 's/"state":"open"/"state":"closed","merged_at":"2026-11-01T00:00:00Z"/')" '{"statuses":[]}' '{"check_runs":[]}'
+check "pr-gate says merged for a merged pull request" "merged" \
+  "$(gh8 pr-gate 12 | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
+gate8 unknown '{"__status":404,"message":"Not Found"}' '{}' '{}'
+check_status "pr-gate of an unknown pull request exits 4" 4 gh8 pr-gate 12
+gate8 nohead '{"number":12,"state":"open","head":{}}' '{}' '{}'
+check_status "pr-gate of a pull request with no head sha exits 3" 3 gh8 pr-gate 12
+
+echo "== draft and back =="
+
+new7 to-draft
+printf '%s' '{"number":7,"node_id":"PR_x"}' > "$F7/GET_repos_acme_thing_pulls_7.json"
+gh7 pr-draft 7 >/dev/null
+check "pr-draft converts the pull request to a draft" "1" \
+  "$(grep -c 'convertPullRequestToDraft' "$F7/sent.jsonl")"
+check "pr-draft puts Not Ready on the pull request" \
+  'POST /repos/acme/thing/issues/7/labels {"labels": ["Not Ready"]}' "$(sent7 | grep '/issues/')"
+
+new7 ready-for-ci
+printf '%s' '{"number":7,"node_id":"PR_x"}' > "$F7/GET_repos_acme_thing_pulls_7.json"
+gh7 pr-ready 7 --for-ci >/dev/null
+check "pr-ready --for-ci leaves draft and keeps Not Ready" \
+  'POST /repos/acme/thing/issues/7/labels {"labels": ["Not Ready"]}' "$(sent7 | grep '/issues/')"
+check "pr-ready --for-ci marks the pull request ready for review" "1" \
+  "$(grep -c 'markPullRequestReadyForReview' "$F7/sent.jsonl")"
+
+echo "== records =="
+
+RECORD="$ROOT/engine/record.py"
+HEAD40=0123456789abcdef0123456789abcdef01234567
+rec() { env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$WORK/cfgrec" python3 "$RECORD" "$@"; }
+recbase() { rec --repo Acme/Thing --pr 12 --head "$HEAD40" --producer pr-review "$@"; }
+
+rm -rf "$WORK/cfgrec"
+path=$(recbase --kind review --result pass --detail "clean at pass 3")
+check "record.py exits 0 on a valid record" "0" "$?"
+check "record.py writes under the lowercased repository and the full head" \
+  "$WORK/cfgrec/pr-records/acme/thing/$HEAD40/" "$(dirname "$path")/"
+check "record.py names the file kind.at.producer.json" "1" \
+  "$(basename "$path" | grep -cE '^review\.[0-9]{8}T[0-9]{6}Z\.pr-review\.json$')"
+check "record.py prints the path of a file that exists" "yes" "$([ -f "$path" ] && echo yes || echo no)"
+check "record.py writes the contract's fields" \
+  "v=1 repo=acme/thing pr=12 head=$HEAD40 kind=review result=pass producer=pr-review detail=clean at pass 3 session=" \
+  "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(" ".join("%s=%s" % (k, d[k]) for k in ("v","repo","pr","head","kind","result","producer","detail","session")))' "$path")"
+check "record.py stamps at in UTC, matching the file name" "1" \
+  "$(python3 -c 'import json,sys,os; d=json.load(open(sys.argv[1])); n=os.path.basename(sys.argv[1]).split(".")[1]; print(1 if d["at"].replace("-","").replace(":","") == n else 0)' "$path")"
+check "record.py leaves no temporary file behind" "1" \
+  "$(ls -A "$(dirname "$path")" | wc -l | tr -d ' ')"
+check "record.py writes one JSON object, nothing else" "1" \
+  "$(python3 -c 'import json,sys; print(1 if isinstance(json.load(open(sys.argv[1])), dict) else 0)' "$path")"
+
+path=$(env CLAUDE_CODE_SESSION_ID=s-42 CLAUDE_CONFIG_DIR="$WORK/cfgrec" python3 "$RECORD" --repo acme/thing --pr 12 --head "$HEAD40" --kind norms --result fail --producer norms)
+check "record.py takes the session from CLAUDE_CODE_SESSION_ID" "s-42" \
+  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session"])' "$path")"
+path=$(recbase --kind e2e --result pass --session given)
+check "record.py takes --session over the environment" "given" \
+  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session"])' "$path")"
+check "record.py writes an empty detail when none is given" "" \
+  "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["detail"])' "$path")"
+
+path=$(env -u CLAUDE_CONFIG_DIR HOME="$WORK/homerec" python3 "$RECORD" --repo acme/thing --pr 12 --head "$HEAD40" --kind e2e --result pass --producer session-e2e)
+check "record.py writes under HOME/.claude without CLAUDE_CONFIG_DIR" \
+  "$WORK/homerec/.claude/pr-records/acme/thing/$HEAD40" "$(dirname "$path")"
+
+path=$(recbase --kind e2e --result waived --detail "waived by the operator on 2026-11-02: no browser here")
+check "record.py accepts an e2e waiver whose detail carries a date" "0" "$?"
+check "record.py lowercases an upper-case head" "$WORK/cfgrec/pr-records/acme/thing/$HEAD40" \
+  "$(dirname "$(rec --repo acme/thing --pr 12 --head "$(printf %s "$HEAD40" | tr a-f A-F)" --kind review --result pass --producer x)")"
+
+long=$(python3 -c 'print("x" * 501)')
+for case in \
+  "short head|--repo acme/thing --pr 12 --head 0123456 --kind review --result pass --producer x" \
+  "non-hex head|--repo acme/thing --pr 12 --head ${HEAD40%?}g --kind review --result pass --producer x" \
+  "unknown kind|--repo acme/thing --pr 12 --head $HEAD40 --kind screenshots --result pass --producer x" \
+  "unknown result|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result ok --producer x" \
+  "waived review|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result waived --detail 2026-11-02 --producer x" \
+  "waiver without detail|--repo acme/thing --pr 12 --head $HEAD40 --kind e2e --result waived --producer x" \
+  "repo without owner|--repo thing --pr 12 --head $HEAD40 --kind review --result pass --producer x" \
+  "repo with a dot path|--repo acme/.. --pr 12 --head $HEAD40 --kind review --result pass --producer x" \
+  "pr not a number|--repo acme/thing --pr x --head $HEAD40 --kind review --result pass --producer x" \
+  "pr zero|--repo acme/thing --pr 0 --head $HEAD40 --kind review --result pass --producer x" \
+  "producer with a capital|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result pass --producer Bad" \
+  "producer with a slash|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result pass --producer a/b" \
+  "missing producer|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result pass" \
+  "unknown option|--repo acme/thing --pr 12 --head $HEAD40 --kind review --result pass --producer x --force"; do
+  name=${case%%|*}
+  # shellcheck disable=SC2086
+  check_status "record.py refuses a $name with exit 2" 2 rec ${case#*|}
+done
+check_status "record.py refuses a waiver whose detail has no date with exit 2" 2 \
+  rec --repo acme/thing --pr 12 --head "$HEAD40" --kind e2e --result waived --detail "the operator said so" --producer x
+check_status "record.py refuses a detail past 500 characters with exit 2" 2 \
+  rec --repo acme/thing --pr 12 --head "$HEAD40" --kind review --result pass --detail "$long" --producer x
+check "record.py prints one error line on a usage error" "1" \
+  "$(rec --repo acme/thing --pr 12 --head 0123 --kind review --result pass --producer x 2>&1 >/dev/null | grep -c '^error: ')"
+check "record.py writes nothing on a usage error" "no" \
+  "$(rm -rf "$WORK/cfgrec2"; env CLAUDE_CONFIG_DIR="$WORK/cfgrec2" python3 "$RECORD" --repo acme/thing --pr 12 --head 0123 --kind review --result pass --producer x 2>/dev/null; [ -e "$WORK/cfgrec2/pr-records" ] && echo yes || echo no)"
+check "record.py imports nothing outside the standard library" "" \
+  "$(grep -E '^(import|from) ' "$RECORD" | grep -vE '^(import|from) (argparse|datetime|json|os|re|sys|tempfile)( |$)')"
+
 
 echo
 echo "$pass passed, $fail failed"

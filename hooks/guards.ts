@@ -108,6 +108,6 @@ export function readerKey(session: string, agentId?: string): string {
 
 export function unreadRefusal(root: string, command: string): string {
   return 'github: read ' + root + WRITING_FILE + ' with the Read tool, whole, before ' + command
-    + ': its rules (commit convention, references, PR titles and descriptions, comments)'
+    + ': its rules (commit convention, references, PR titles and descriptions, comments, ready pull requests)'
     + ' apply to this text. Then run the same command again.'
 }

@@ -107,6 +107,35 @@ rules still apply. Elsewhere every write is asked as before. An absent file
 lists no repository; an unreadable or malformed one lists none either and
 says so in one transcript line. The plugin never writes the file.
 
+## Ready pull requests
+
+A pull request is ready when four things hold at its current head commit: a
+clean review, a passed norms check, passed end-to-end tests (or a waiver the
+operator dated in his own words) and green CI. The `Ready` label, leaving
+draft and a merge need the four; a draft carries `Not Ready`, and a push to
+the branch puts `Not Ready` back. CI is read from GitHub: no check at all is
+green, a check that failed, still runs, was skipped, or is neutral on a draft
+is not. The other three are records, one small JSON file per run under
+`~/.claude/pr-records/<owner>/<name>/<head>/`, written by their producers:
+claude-review's auto-fix-loop for the review, `/norms:check` for the norms,
+`mcp__github__record` for the end-to-end run, and the orchestrator's ready
+step. A record counts only at the head it names, so a new commit voids them
+all without anything deleted. `engine/REFERENCE.md` « Records » holds the
+contract; `engine/WRITING.md` « Ready pull requests » the rule.
+
+When the CI does not run on a draft, the pull request leaves draft for it,
+still `Not Ready`, goes back to draft once the CI is green, then takes
+`Ready`. That undraft runs in every repository, with one transcript line:
+
+```
+github: <owner/name>#<n> out of draft to run CI, still Not Ready
+```
+
+This release ships the ready guard in its warn phase: an act that is not ready
+goes ahead with one transcript line and one JSON line in `guard-warn.log`, in
+the plugin's data directory. `CLAUDE_GITHUB_READY_ENFORCE=1` in the
+environment brings the enforce phase forward, where it is refused.
+
 ## Guards
 
 **WRITING.md read.** Before a session writes a commit (`git commit`), opens, edits
@@ -119,11 +148,63 @@ compaction asks for one more read. Commands are read word by word, so a message
 that only mentions one passes. Until then the call is refused with:
 
 ```
-github: read <root>/engine/WRITING.md with the Read tool, whole, before <command>: its rules (commit convention, references, PR titles and descriptions, comments) apply to this text. Then run the same command again.
+github: read <root>/engine/WRITING.md with the Read tool, whole, before <command>: its rules (commit convention, references, PR titles and descriptions, comments, ready pull requests) apply to this text. Then run the same command again.
 ```
 
 A failure of the guard itself lets the call through with one transcript line,
 and the writing rules above still apply.
+
+**Ready.** Marking a pull request `Ready`, taking it out of draft and merging it
+(`gh pr merge --auto` included) need the four conditions above, through the tool
+(`pr-ready`, `pr-merge`, `pr-readiness ready`, `label-add Ready`) and through the
+shell (`gh pr ready`, `gh pr merge`, `gh pr edit` or `gh issue edit` with
+`--add-label Ready`, `gh api` on a pull request's merge or labels). Under enforce
+the act is refused before anyone is asked, and a pull request still carrying
+`Ready` goes back to `Not Ready`:
+
+```
+github: <act> refused on <owner/name>#<n> at <head7>: not ready. Missing: <item>, <item>. A pull request is ready when a clean review, a passed norms check, passed E2E and green CI are all at its current head (engine/WRITING.md « Ready pull requests »).
+```
+
+Under warn the act goes ahead with `github: <act> on <owner/name>#<n> is not
+ready, let through while the guard only warns. Missing: <item>`. A pull request
+opened out of draft is refused under enforce with `github: <act> refused: open it
+as a draft, then leave draft once ready.`, and a readiness GitHub did not answer
+with `github: readiness of <owner/name>#<n> unverified: <error>`. Going back to
+draft always passes, and `gh pr create --draft` and `gh pr ready --undo` put
+`Not Ready` on, as the tool does. A merge, an undraft or a `Ready` label in the
+shell names its repository, else under both phases (the label under enforce
+only) it is refused with `github: <command> refused: name the repository with -R
+owner/name.`; a GraphQL merge or undraft names none and is always refused, with
+the tool call to run instead.
+
+**Auto-merge split.** In the shell, a merge or leaving draft runs only in a
+repository listed in `auto-merge.json`, and the ready guard applies on top.
+Elsewhere it is refused in both phases, so the operator is asked in the
+conversation through the tool:
+
+```
+github: <gh pr merge | gh pr ready> refused on <owner/name>: this repository is not in auto-merge, so a merge or leaving draft needs the operator's explicit word. When he gave it, run mcp__github__gh <pr-merge | pr-ready> {"pr": <n>} on <owner/name>: it checks that the pull request is ready, then asks him in the conversation.
+```
+
+A CI undraft, as above, is the exception, through the shell and the tool alike.
+
+**Records.** The records are written by their producers alone. A Write, an Edit
+or a MultiEdit under the records root, and a shell command that names it,
+a `pr-records/` path or `engine/record.py`, are refused with:
+
+```
+github: records are written by their producers (claude-review's auto-fix-loop, /norms:check, the orchestrator's ready, mcp__github__record for E2E), never by hand.
+```
+
+The command is read as text, so a plain `ls` of the root is refused too; reading
+a record with the Read tool passes. `mcp__github__record` writes at the head the
+checkout and the pull request share, on a clean tree, one kind per caller: E2E
+for a session, the review for claude-review's hooks, the norms for the norms
+plugin's. A waiver quotes words the operator typed in the session, with their
+date. Once a
+day at most, the start of a session prunes the head directories whose newest
+record is older than 90 days.
 
 ## Tests
 

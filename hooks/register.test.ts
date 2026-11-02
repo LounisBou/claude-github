@@ -81,6 +81,10 @@ async function stubMod(
   })
 }
 
+// The engine runs of the act itself: the pr-gate read the ready guard makes
+// before a merge or an undraft goes ahead left out.
+const acts = (runs: any[]) => runs.filter((r) => r.command !== 'pr-gate')
+
 // The plugin's root: the directory above this file's.
 const ROOT = decodeURIComponent(new URL('..', import.meta.url).pathname).replace(/\/$/, '')
 // The path whose Read fails, when a test sets one.
@@ -868,7 +872,8 @@ test('a pr-ready on a repository in auto-merge is not asked', async ($, on) => {
   const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
   expect(out).toEqual({ result: 'ok' })
   expect(asked.length).toBe(0)
-  expect(runs.length).toBe(1)
+  expect(acts(runs).length).toBe(1)
+  expect(runs.filter((r) => r.command === 'pr-gate').length).toBe(1)
 })
 
 test('a pr-ready on a repository not in auto-merge is asked', async ($, on) => {
@@ -883,7 +888,7 @@ test('a pr-ready on a repository not in auto-merge is asked', async ($, on) => {
   expect(asked.length).toBe(1)
   expect(asked[0]).toContain('out of draft')
   expect(JSON.stringify(out)).toContain('refused gh pr-ready')
-  expect(runs.length).toBe(0)
+  expect(acts(runs).length).toBe(0)
 })
 
 test('with no auto-merge file a pr-ready is asked, and nothing is logged', async ($, on) => {
@@ -897,7 +902,7 @@ test('with no auto-merge file a pr-ready is asked, and nothing is logged', async
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
   expect(asked.length).toBe(1)
-  expect(runs.length).toBe(0)
+  expect(acts(runs).length).toBe(0)
   expect(logs).toEqual([])
 })
 
@@ -913,7 +918,7 @@ for (const [what, text] of [['unreadable', null], ['without a list', '{"reposito
 
     await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
     expect(asked.length).toBe(1)
-    expect(runs.length).toBe(0)
+    expect(acts(runs).length).toBe(0)
     expect(logs.length).toBe(1)
     expect(logs[0]).toContain('/data/github/auto-merge.json')
   })
@@ -949,7 +954,7 @@ test('a pull request opened out of draft on a repository not in auto-merge is st
   expect(asked.length).toBe(2)
   expect(asked[0]).toContain('not as a draft')
   expect(asked[1]).toContain('out of draft')
-  expect(runs.length).toBe(1)
+  expect(acts(runs).length).toBe(1)
 })
 
 test('a description replaced is refused under a deny rule', async ($, on) => {
@@ -1015,7 +1020,8 @@ for (const [command, args] of SOME_WRITES) {
     const out = await $.tool.call({ tool: 'mcp__github__gh', command, args, repo: 'acme/thing' })
     expect(out).toEqual({ result: 'ok' })
     expect(asked.length).toBe(0)
-    expect(runs.length).toBe(1)
+    expect(acts(runs).length).toBe(1)
+    if (command === 'pr-merge') expect(runs.filter((r) => r.command === 'pr-gate').length).toBe(1)
   })
 
   test('a ' + command + ' with an ask and no rule on a repository not in auto-merge is asked', async ($, on) => {
@@ -1131,7 +1137,7 @@ test('without a repo in the call, the checkout\'s origin names the repository', 
   const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
   expect(out).toEqual({ result: 'ok' })
   expect(asked.length).toBe(0)
-  expect(runs.map((r) => r.argv[0])).toEqual(['git', 'python3'])
+  expect(acts(runs).map((r) => r.argv[0])).toEqual(['git', 'python3'])
 })
 
 test('GH_REPO names the repository before the origin, as it does for the engine', async ($, on) => {
@@ -1147,7 +1153,7 @@ test('GH_REPO names the repository before the origin, as it does for the engine'
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 } })
   expect(asked.length).toBe(1)
-  expect(runs.length).toBe(0)
+  expect(acts(runs).length).toBe(0)
 })
 
 test('a repo in the call names the repository before one in its args', async ($, on) => {
@@ -1178,7 +1184,7 @@ test('an empty repo in the call hides the one in its args, as the engine\'s last
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1, repo: 'acme/thing' }, repo: '' })
   expect(asked.length).toBe(1)
-  expect(runs.map((r) => r.argv[0])).toEqual(['git'])
+  expect(acts(runs).map((r) => r.argv[0])).toEqual(['git'])
 })
 
 test('a repo in the args alone names the repository', async ($, on) => {
@@ -1192,7 +1198,7 @@ test('a repo in the args alone names the repository', async ($, on) => {
   const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1, repo: 'acme/thing' } })
   expect(out).toEqual({ result: 'ok' })
   expect(asked.length).toBe(0)
-  expect(runs.map((r) => r.argv[0])).toEqual(['python3'])
+  expect(acts(runs).map((r) => r.argv[0])).toEqual(['python3'])
 })
 
 test('an https origin of a listed repository, in another case, is not asked', async ($, on) => {
@@ -1255,7 +1261,7 @@ test('an auto-merge list that is not made of strings asks, with one log line', a
 
   await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-ready', args: { pr: 1 }, repo: 'acme/thing' })
   expect(asked.length).toBe(1)
-  expect(runs.length).toBe(0)
+  expect(acts(runs).length).toBe(0)
   expect(logs.length).toBe(1)
   expect(logs[0]).toContain('/data/github/auto-merge.json')
 })
@@ -1621,6 +1627,15 @@ test('a fresh session\'s git commit is refused with the path, and passes once WR
   const again: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m "fix: x"' })
   expect(again.deny).toBeUndefined()
   expect(bash).toEqual(['git commit -m "fix: x"'])
+})
+
+test('the refusal names every rule WRITING.md holds, ready pull requests included', async ($, on) => {
+  await stubGuard($, on, [], [])
+
+  const out: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m "fix: x"' })
+  expect(out.deny).toBe('github: read ' + writingFile() + ' with the Read tool, whole, before git commit: its rules'
+    + ' (commit convention, references, PR titles and descriptions, comments, ready pull requests)'
+    + ' apply to this text. Then run the same command again.')
 })
 
 test('git\'s global options and a wrapper before git commit are read through', async ($, on) => {

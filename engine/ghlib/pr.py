@@ -59,6 +59,61 @@ def pr_checks(args):
     return {"statuses": statuses, "check_runs": runs.get("check_runs", [])}
 
 
+def _gate_ci(statuses, runs, draft):
+    """CI at one head, as the ready guard reads it. A completed check passes
+    on success, and on neutral out of draft. A skipped one, and on a draft a
+    neutral one, did not prove anything: not green. Any other conclusion is a
+    failure, named by its check. A check still running is not green. No check
+    at all is green."""
+    commit_statuses = (statuses or {}).get("statuses") or []
+    passing = ("success",) if draft else ("success", "neutral")
+    unproven = ("skipped", "neutral") if draft else ("skipped",)
+    completed = [run for run in runs if run.get("status") == "completed"]
+    failed = [
+        run.get("name", "?") for run in completed if run.get("conclusion") not in passing + unproven
+    ] + [status.get("context", "?") for status in commit_statuses if status.get("state") in ("failure", "error")]
+    running = [run for run in runs if run.get("status") != "completed"] + [
+        status for status in commit_statuses if status.get("state") == "pending"
+    ]
+    skipped = [run.get("name", "?") for run in completed if run.get("conclusion") in unproven]
+    if failed:
+        result = "FAILURE"
+    elif running or skipped:
+        result = "PENDING"
+    else:
+        result = "SUCCESS"
+    return {
+        "result": result,
+        "failed": failed,
+        "running": len(running),
+        "skipped": skipped,
+        "total": len(runs) + len(commit_statuses),
+    }
+
+
+def pr_gate(args):
+    owner, name = repo.owner_repo()
+    try:
+        pull = http.rest("GET", "/repos/%s/%s/pulls/%s" % (owner, name, args.pr))
+    except errors.NotFound:
+        raise errors.NotFound("no pull request #%s in %s/%s" % (args.pr, owner, name))
+    sha = (pull.get("head") or {}).get("sha") or ""
+    if not _FULL_SHA.match(sha):
+        raise errors.ApiError("pull request %s has no head sha" % args.pr)
+    statuses = http.rest("GET", "/repos/%s/%s/commits/%s/status" % (owner, name, sha))
+    runs = http.rest("GET", "/repos/%s/%s/commits/%s/check-runs?per_page=100" % (owner, name, sha))
+    state = "merged" if pull.get("merged_at") else pull.get("state", "")
+    return {
+        "repo": ("%s/%s" % (owner, name)).lower(),
+        "pr": pull.get("number", args.pr),
+        "state": state,
+        "draft": bool(pull.get("draft")),
+        "head": sha.lower(),
+        "labels": [label.get("name", "") for label in pull.get("labels") or []],
+        "ci": _gate_ci(statuses, (runs or {}).get("check_runs") or [], bool(pull.get("draft"))),
+    }
+
+
 def pr_diff(args):
     owner, name = repo.owner_repo()
     result = http.rest(
@@ -229,6 +284,10 @@ def register(subparsers):
     parser = subparsers.add_parser("pr-status", help="get PR state")
     parser.add_argument("pr", type=int)
     parser.set_defaults(handler=pr_status)
+
+    parser = subparsers.add_parser("pr-gate", help="state, head, labels and CI, as the ready guard reads them")
+    parser.add_argument("pr", type=int)
+    parser.set_defaults(handler=pr_gate)
 
     parser = subparsers.add_parser("pr-checks", help="combined status and check runs")
     parser.add_argument("pr", type=int)
