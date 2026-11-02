@@ -902,7 +902,7 @@ function typedVerbatim(text: string): boolean {
   return text.trim() !== '' && typedPrompts.some((prompt) => prompt.includes(text))
 }
 
-async function writeRecord($: any, e: any, origin: string): Promise<{ result?: string; deny?: string }> {
+async function writeRecord($: any, e: any, origin: string): Promise<{ result?: string; deny?: string; isError?: boolean }> {
   const verdict = await $.tool.check({ tool: RECORD_TOOL, input: { pr: e.pr, repo: e.repo, kind: e.kind, result: e.result, detail: e.detail } })
   if (verdict.decision === 'deny') return { deny: verdict.reason || 'refused by a permission rule' }
   const owned = recordKindFor(origin)
@@ -948,7 +948,7 @@ async function writeRecord($: any, e: any, origin: string): Promise<{ result?: s
     '--kind', kind, '--result', result, '--producer', producerSlug(origin), '--detail', detail, '--session', session,
   ]
   const run = await $.process.run(argv, { timeoutMs: 30_000 })
-  if (run.exitCode !== 0) return { result: String(run.stderr || 'record.py exited ' + run.exitCode).trim() }
+  if (run.exitCode !== 0) return { result: String(run.stderr || 'record.py exited ' + run.exitCode).trim(), isError: true }
   return { result: String(run.stdout).trim() }
 }
 

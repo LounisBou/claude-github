@@ -29,6 +29,8 @@ type World = {
   answer?: string
   // What the Bash tool answers.
   bashResult?: any
+  // What record.py answers when it fails: its exit code and stderr.
+  recordFails?: { exitCode: number; stderr: string }
   // The files and directories $.fs sees beside the records, by path.
   tree?: Record<string, { kind: 'file' | 'directory'; mtimeMs: number; text?: string }>
 }
@@ -110,6 +112,7 @@ async function world($: any, on: any, w: World = {}): Promise<Seen> {
       return { value: answer ? { stderr: '', ...answer } : { exitCode: 1, stdout: '', stderr: 'no' } }
     }
     if (String(e.argv[1] ?? '').endsWith('/engine/record.py')) {
+      if (w.recordFails) return { value: { stdout: '', ...w.recordFails } }
       return { value: { exitCode: 0, stdout: HEAD_DIR + '/e2e.20261102T100000Z.session-e2e.json\n', stderr: '' } }
     }
     if (stdin.command === 'pr-gate') {
@@ -607,6 +610,12 @@ test('the model records its E2E at the pull request\'s head from a clean checkou
   expect(argv.slice(0, 14)).toEqual(['--repo', 'acme/thing', '--pr', '12', '--head', HEAD, '--kind', 'e2e', '--result', 'pass',
     '--producer', 'session-e2e', '--detail', 'ran the smoke suite'])
   expect(argv[15]).toContain('guard-session-')
+})
+
+test('a record.py that fails is an error to the caller, with its message', async ($, on) => {
+  await world($, on, { git: CLEAN, recordFails: { exitCode: 2, stderr: 'error: --detail is past 500 characters\n' } })
+  const out: any = await $.tool.call({ tool: 'mcp__github__record', pr: 12, repo: 'acme/thing', result: 'pass', detail: 'x' } as any)
+  expect(out).toEqual({ result: 'error: --detail is past 500 characters', isError: true })
 })
 
 test('the model may not record a review or a norms check', async ($, on) => {
