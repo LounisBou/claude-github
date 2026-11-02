@@ -873,6 +873,7 @@ test('a pr-ready on a repository in auto-merge is not asked', async ($, on) => {
   expect(out).toEqual({ result: 'ok' })
   expect(asked.length).toBe(0)
   expect(acts(runs).length).toBe(1)
+  expect(runs.filter((r) => r.command === 'pr-gate').length).toBe(1)
 })
 
 test('a pr-ready on a repository not in auto-merge is asked', async ($, on) => {
@@ -1020,6 +1021,7 @@ for (const [command, args] of SOME_WRITES) {
     expect(out).toEqual({ result: 'ok' })
     expect(asked.length).toBe(0)
     expect(acts(runs).length).toBe(1)
+    if (command === 'pr-merge') expect(runs.filter((r) => r.command === 'pr-gate').length).toBe(1)
   })
 
   test('a ' + command + ' with an ask and no rule on a repository not in auto-merge is asked', async ($, on) => {
