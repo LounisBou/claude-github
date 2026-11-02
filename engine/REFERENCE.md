@@ -42,12 +42,21 @@ or a review comment, read `WRITING.md` beside this file.
 | `pr-list` | | Open PRs |
 | `pr-status` | `<pr>` | State, draft flag, head and base |
 | `pr-checks` | `<pr>` | Combined commit status and check runs |
+| `pr-gate` | `<pr>` | `{"repo", "pr", "state", "draft", "head", "labels", "ci": {"result", "failed", "running", "skipped", "total"}}`, the reads the ready guard decides on (below) |
 | `pr-diff` | `<pr>` | Unified diff as plain text |
 | `pr-files` | `<pr>` | Changed paths with their patches, paginated |
 | `pr-commits` | `<pr>` | Commits on the PR, paginated |
 | `file-at-ref` | `<path> <ref>` | A file's contents at a ref |
 | `pr-create` | `--title T [--body-file P] [--base B] [--head H] [--draft]` | Open a PR from the current branch, `--draft` for a draft (the house default). A draft gets the `Not Ready` label, any other PR the `Ready` one. A label failure is printed as an `error:` line on stderr and does not fail the command |
 | `pr-merge` | `<pr> [--method merge\|squash\|rebase] [--sha SHA]` | Merge a PR, optionally pinned to the head that was verified |
+
+`pr-gate` makes three REST reads: the pull request, the combined status and the check
+runs at its head (`per_page=100`). `state` is `open`, `closed` or `merged`, `head` the
+full sha, `labels` the names it carries. `ci.total` counts the check runs plus the
+commit statuses at that head. `ci.result` is `FAILURE` when one failed (`ci.failed`
+names them), `PENDING` when one still runs (`ci.running` counts them) or when one
+proved nothing: `skipped`, or `neutral` on a draft (`ci.skipped` names them), and
+`SUCCESS` otherwise, no check at all included.
 
 `file-at-ref` returns `content`, plus `binary`. When the file is not valid UTF-8,
 `binary` is true and `content` holds base64 — the bytes are never decoded lossily.
@@ -113,7 +122,8 @@ to `RIGHT`). `commit_id` is the PR head, read by the tool. The request carries n
 | Subcommand | Arguments | Description |
 |---|---|---|
 | `pr-update` | `<pr> [--title T] [--body-file P] [--base B] [--state open\|closed]` | Change a PR's fields |
-| `pr-ready` | `<pr>` | Mark a draft ready for review, and put the `Ready` label on it |
+| `pr-ready` | `<pr> [--for-ci]` | Mark a draft ready for review, and put the `Ready` label on it. `--for-ci` takes it out of draft only for its CI to run, and puts `Not Ready` on it |
+| `pr-draft` | `<pr>` | Convert a pull request back to a draft, and put the `Not Ready` label on it |
 | `pr-readiness` | `<pr> <ready\|not-ready>` | Put `Ready` or `Not Ready` on a PR and take the other off, creating the labels when missing. Prints the state now carried, `(unchanged)` after it when nothing changed |
 | `labels-ensure` | | Create `Ready` (`27e760`) and `Not Ready` (`8c1455`) when missing, no description. A label already there under that name, in any case, is left as it is. One line per label: `created <name>` or `present <name>`, with ` #<colour>` when it differs from the house colour |
 | `label-add` | `<pr> <label>...` | Add labels |

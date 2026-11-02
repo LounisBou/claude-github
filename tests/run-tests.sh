@@ -1819,6 +1819,73 @@ check "stdin json maps pr-readiness positionals by name" \
 check "stdin json accepts labels-ensure with no positional" \
   "labels-ensure" "$(argv6 '{"command":"labels-ensure"}')"
 
+echo "== readiness reads =="
+
+GATEHEAD=89abcdef0123456789abcdef0123456789abcdef
+# gate8 <scenario> <pull json> <combined status json> <check runs json>: one
+# fixture directory with the three reads pr-gate makes.
+gate8() {
+  F8="$WORK/fix8-$1"; rm -rf "$F8"; mkdir -p "$F8"
+  printf '%s' "$2" > "$F8/GET_repos_acme_thing_pulls_12.json"
+  printf '%s' "$3" > "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_status.json"
+  printf '%s' "$4" > "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_check-runs__per_page=100.json"
+}
+gh8() { env GH_FIXTURES="$F8" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
+ci8() { gh8 pr-gate 12 | python3 -c 'import json,sys; c=json.load(sys.stdin)["ci"]; print(c["result"], ",".join(c["failed"]), ",".join(c["skipped"]), c["total"])'; }
+PULL8='{"number":12,"state":"open","draft":false,"head":{"sha":"'$GATEHEAD'","ref":"feat"},"labels":[{"name":"Not Ready"},{"name":"bug"}]}'
+
+gate8 shape "$PULL8" '{"state":"success","statuses":[{"context":"ci/legacy","state":"success"}]}' '{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"success"}]}'
+check "pr-gate answers repo, pr, state, draft, head, labels and ci" \
+  "acme/thing 12 open False $GATEHEAD Not Ready|bug SUCCESS 2" \
+  "$(gh8 pr-gate 12 | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["repo"], d["pr"], d["state"], d["draft"], d["head"], "|".join(d["labels"]), d["ci"]["result"], d["ci"]["total"])')"
+check "pr-gate makes three reads, the check runs a full page" \
+  "GET /repos/acme/thing/pulls/12|GET /repos/acme/thing/commits/$GATEHEAD/status|GET /repos/acme/thing/commits/$GATEHEAD/check-runs?per_page=100" \
+  "$(python3 -c 'import json,sys; print("|".join(json.loads(l)["method"] + " " + json.loads(l)["path"] for l in open(sys.argv[1])))' "$F8/sent.jsonl")"
+
+gate8 none "$PULL8" '{"state":"pending","statuses":[]}' '{"total_count":0,"check_runs":[]}'
+check "pr-gate reads no check at all as green, total 0" "SUCCESS   0" "$(ci8)"
+
+gate8 failed "$PULL8" '{"state":"failure","statuses":[{"context":"ci/legacy","state":"error"}]}' '{"check_runs":[{"name":"lint","status":"completed","conclusion":"failure"},{"name":"test","status":"completed","conclusion":"success"}]}'
+check "pr-gate names the failed checks and statuses" "FAILURE lint,ci/legacy  3" "$(ci8)"
+
+gate8 running "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"test","status":"in_progress","conclusion":null}]}'
+check "pr-gate reads a running check as pending" "PENDING   1" "$(ci8)"
+
+gate8 skipped "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"test","status":"completed","conclusion":"skipped"},{"name":"lint","status":"completed","conclusion":"success"}]}'
+check "pr-gate never reads a skipped check as green" "PENDING  test 2" "$(ci8)"
+
+gate8 neutral-open "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}'
+check "pr-gate reads a neutral check out of draft as green" "SUCCESS   1" "$(ci8)"
+
+gate8 neutral-draft "$(printf '%s' "$PULL8" | sed 's/"draft":false/"draft":true/')" '{"statuses":[]}' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}'
+check "pr-gate never reads a neutral check on a draft as green" "PENDING  scan 1" "$(ci8)"
+
+gate8 merged "$(printf '%s' "$PULL8" | sed 's/"state":"open"/"state":"closed","merged_at":"2026-11-01T00:00:00Z"/')" '{"statuses":[]}' '{"check_runs":[]}'
+check "pr-gate says merged for a merged pull request" "merged" \
+  "$(gh8 pr-gate 12 | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
+gate8 unknown '{"__status":404,"message":"Not Found"}' '{}' '{}'
+check_status "pr-gate of an unknown pull request exits 4" 4 gh8 pr-gate 12
+gate8 nohead '{"number":12,"state":"open","head":{}}' '{}' '{}'
+check_status "pr-gate of a pull request with no head sha exits 3" 3 gh8 pr-gate 12
+
+echo "== draft and back =="
+
+new7 to-draft
+printf '%s' '{"number":7,"node_id":"PR_x"}' > "$F7/GET_repos_acme_thing_pulls_7.json"
+gh7 pr-draft 7 >/dev/null
+check "pr-draft converts the pull request to a draft" "1" \
+  "$(grep -c 'convertPullRequestToDraft' "$F7/sent.jsonl")"
+check "pr-draft puts Not Ready on the pull request" \
+  'POST /repos/acme/thing/issues/7/labels {"labels": ["Not Ready"]}' "$(sent7 | grep '/issues/')"
+
+new7 ready-for-ci
+printf '%s' '{"number":7,"node_id":"PR_x"}' > "$F7/GET_repos_acme_thing_pulls_7.json"
+gh7 pr-ready 7 --for-ci >/dev/null
+check "pr-ready --for-ci leaves draft and keeps Not Ready" \
+  'POST /repos/acme/thing/issues/7/labels {"labels": ["Not Ready"]}' "$(sent7 | grep '/issues/')"
+check "pr-ready --for-ci marks the pull request ready for review" "1" \
+  "$(grep -c 'markPullRequestReadyForReview' "$F7/sent.jsonl")"
+
 echo "== records =="
 
 RECORD="$ROOT/engine/record.py"

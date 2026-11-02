@@ -17,14 +17,14 @@ export const PANE_ID = 'github-prs'
 // arguments (--stdin-json); tests/run-tests.sh fails when this list and the
 // engine's parser disagree.
 export const COMMANDS = [
-  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-diff', 'pr-files',
+  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-gate', 'pr-diff', 'pr-files',
   'pr-commits', 'file-at-ref', 'pr-create', 'pr-merge', 'pr-threads',
   'pr-comments', 'pr-issue-comments', 'pr-reviews', 'thread-reply',
   'pr-comment', 'comment-edit', 'comment-delete', 'thread-resolve',
   'comment-resolve', 'comment-unresolve', 'comment-resolved',
   'comments-resolved-batch', 'review-submit', 'review-pending-create',
   'review-pending-add', 'review-pending', 'repo-review-comments', 'pr-update',
-  'pr-ready', 'label-add', 'label-remove', 'reviewer-add', 'reviewer-remove',
+  'pr-ready', 'pr-draft', 'label-add', 'label-remove', 'reviewer-add', 'reviewer-remove',
   'assignee-add', 'assignee-remove', 'labels-ensure', 'pr-readiness', 'issue-view', 'issue-list',
   'issue-search', 'pr-linked-issues', 'image-upload', 'auth-check',
 ]
@@ -32,7 +32,7 @@ export const COMMANDS = [
 // The subcommands that only read. Every other one writes to GitHub, and a
 // command missing here is treated as a write, so the safe side is the default.
 export const READS = new Set([
-  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-diff', 'pr-files', 'pr-commits',
+  'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-gate', 'pr-diff', 'pr-files', 'pr-commits',
   'file-at-ref', 'pr-threads', 'pr-comments', 'pr-issue-comments', 'pr-reviews',
   'comment-resolved', 'comments-resolved-batch', 'review-pending', 'repo-review-comments',
   'issue-view', 'issue-list', 'issue-search', 'pr-linked-issues', 'auth-check',

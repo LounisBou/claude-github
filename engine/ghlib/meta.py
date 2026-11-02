@@ -13,6 +13,14 @@ mutation($id:ID!) {
 }
 """
 
+_DRAFT = """
+mutation($id:ID!) {
+  convertPullRequestToDraft(input:{pullRequestId:$id}) {
+    pullRequest { number isDraft }
+  }
+}
+"""
+
 # The two readiness labels, with the names and colours the house uses.
 READY = "Ready"
 NOT_READY = "Not Ready"
@@ -36,17 +44,29 @@ def pr_update(args):
     return http.rest("PATCH", "/repos/%s/%s/pulls/%s" % (owner, name, args.pr), payload)
 
 
-def pr_ready(args):
-    owner, name = repo.owner_repo()
-    pull = http.rest("GET", "/repos/%s/%s/pulls/%s" % (owner, name, args.pr))
+def _node_id(owner, name, pr):
+    pull = http.rest("GET", "/repos/%s/%s/pulls/%s" % (owner, name, pr))
     # A fixture or a malformed API response can hand back a pull request with
     # no node_id. An unguarded pull["node_id"] would raise KeyError past the
     # error mapping and surface as a traceback instead of a mapped exit.
     node_id = pull.get("node_id")
     if not node_id:
-        raise errors.ApiError("pull request %s has no node_id" % args.pr)
-    result = http.graphql(_READY, {"id": node_id})
-    follow_readiness(owner, name, args.pr, "ready")
+        raise errors.ApiError("pull request %s has no node_id" % pr)
+    return node_id
+
+
+def pr_ready(args):
+    owner, name = repo.owner_repo()
+    result = http.graphql(_READY, {"id": _node_id(owner, name, args.pr)})
+    # Out of draft only for its CI to run: the pull request stays Not Ready.
+    follow_readiness(owner, name, args.pr, "not-ready" if args.for_ci else "ready")
+    return result
+
+
+def pr_draft(args):
+    owner, name = repo.owner_repo()
+    result = http.graphql(_DRAFT, {"id": _node_id(owner, name, args.pr)})
+    follow_readiness(owner, name, args.pr, "not-ready")
     return result
 
 
@@ -182,7 +202,12 @@ def register(subparsers):
 
     parser = subparsers.add_parser("pr-ready", help="mark a draft PR ready for review")
     parser.add_argument("pr", type=int)
+    parser.add_argument("--for-ci", dest="for_ci", action="store_true", help="out of draft for CI, still Not Ready")
     parser.set_defaults(handler=pr_ready)
+
+    parser = subparsers.add_parser("pr-draft", help="convert a PR back to a draft")
+    parser.add_argument("pr", type=int)
+    parser.set_defaults(handler=pr_draft)
 
     parser = subparsers.add_parser("labels-ensure", help="create the Ready and Not Ready labels when missing")
     parser.set_defaults(handler=labels_ensure)
