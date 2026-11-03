@@ -2257,6 +2257,22 @@ test('a title or body a shell variable or substitution gives is left to the pers
   }
 })
 
+test('a body file under ~ is read from HOME, a relative one after a cd is left to the person', async ($, on) => {
+  const bash: string[] = []
+  const bad = 'Adds the reset; at last.\n\n' + NONE
+  on('env.get', (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
+  await stubBashLint($, on, bash, [], 'Deny', { '/home/me/b.md': bad, '/work/b.md': bad, '/tmp/b.md': bad })
+
+  const home: any = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "feat: x" --body-file ~/b.md' })
+  expect(home.deny).toContain('- body: no semicolon in prose')
+  const absolute: any = await $.tool.call({ tool: 'Bash', command: 'cd sub && gh pr create --title "feat: x" -F /tmp/b.md' })
+  expect(absolute.deny).toContain('- body: no semicolon in prose')
+  const moved = 'cd sub && gh pr create --title "feat: x" --body-file b.md'
+  const out: any = await $.tool.call({ tool: 'Bash', command: moved })
+  expect(out.deny).toBeUndefined()
+  expect(bash).toEqual([moved])
+})
+
 test('a body in a heredoc substitution is read and linted', async ($, on) => {
   const bash: string[] = []
   await stubBashLint($, on, bash, [], 'Deny')

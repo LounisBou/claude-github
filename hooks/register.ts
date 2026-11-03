@@ -172,7 +172,7 @@ async function bashLint($: any, line: string): Promise<string | undefined> {
     if (text.body !== undefined) args.body = text.body
     else if (text.bodyFile !== undefined) {
       try {
-        args.body = String(await $.fs.read(normalise(text.bodyFile, String(await $.session.cwd()))))
+        args.body = String(await $.fs.read(await bodyPath($, text.bodyFile)))
       } catch {
         // An unreadable file is gh's to refuse.
       }
@@ -191,6 +191,17 @@ async function bashLint($: any, line: string): Promise<string | undefined> {
     if (refused) return refused
   }
   return undefined
+}
+
+// The file a --body-file names, as the shell reads it: `~` is HOME, a relative
+// path is under the session's directory.
+async function bodyPath($: any, file: string): Promise<string> {
+  const tilde = /^~(\/|$)/.exec(file)
+  if (!tilde && file.startsWith('~')) throw new Error('another user\'s home is not read: ' + file)
+  if (!tilde) return normalise(file, String(await $.session.cwd()))
+  const home = await $.env.get('HOME')
+  if (!home) throw new Error('HOME is unset, ' + file + ' is not read')
+  return normalise(String(home) + file.slice(1))
 }
 
 async function ask($: any, question: string, options: string[], command: string): Promise<string | undefined> {

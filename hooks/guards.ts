@@ -150,13 +150,18 @@ function markExpansions(line: string): string {
 
 // The texts the gh pr commands of a Bash line write, each with the tool's
 // subcommand whose writing rules it keeps. A body read from stdin, one a
-// command substitution makes and no heredoc shows, and a title, body or file
-// a shell variable or substitution gives are left out.
+// command substitution makes and no heredoc shows, a title, body or file a
+// shell variable or substitution gives, and a relative file after a cd are left
+// out.
 export function bashTexts(line: string): BashText[] {
   const out: BashText[] = []
   const substituted = substitutes(line)
   const marked = simpleCommands(markExpansions(line))
-  simpleCommands(line).forEach((argv, n) => {
+  const commands = simpleCommands(line)
+  // A cd moves the directory a relative path is read from: the hook knows only
+  // the session's.
+  const moves = commands.some((argv) => argv[0] === 'cd')
+  commands.forEach((argv, n) => {
     const name = authoringCommand(argv)
     const gh = name?.startsWith('gh pr ') ? ghWords(argv) : undefined
     const command = gh ? LINTED_AS[gh.verb] : undefined
@@ -171,7 +176,7 @@ export function bashTexts(line: string): BashText[] {
     if (body !== undefined) {
       if (!substituted && read(body) !== undefined) text.body = body
       else if (substituted && heredocBody(line) !== undefined) text.body = heredocBody(line)
-    } else if (read(file) !== undefined && file !== '-') {
+    } else if (read(file) !== undefined && file !== '-' && !(moves && !/^[/~]/.test(file ?? ''))) {
       text.bodyFile = file
     }
     if (text.title !== undefined || text.body !== undefined || text.bodyFile !== undefined) out.push(text)
