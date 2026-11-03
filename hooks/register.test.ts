@@ -741,17 +741,18 @@ test('a missing section, one out of order, an empty one, `none` beside items or 
 })
 
 test('a bare pull request reference in the summary is refused, the same in a section or a closing keyword is not', () => {
-  const rule = 'body: no pull request reference in the summary above the sections, `#N`, `owner/repo#N` or a pull request URL: it goes in PRs Dependency or Related PRs'
+  const rule = 'body: no pull request reference in the summary above the sections, `#N`, `repo#N`, `owner/repo#N` or a pull request URL: it goes in PRs Dependency or Related PRs'
   for (const summary of [
     'Ships in any order with #1620 and #1626.',
     'Ships after acme/front#1620.',
+    'Ships after front#1620.',
     'Ships after https://github.com/acme/front/pull/1620.',
   ]) {
     expect(rulesOf('pr-create', { title: 't', body: summary + '\n\n' + NONE }), summary).toEqual([rule])
   }
   const sectioned = 'Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:**\n- https://github.com/acme/front/pull/1620\n- acme/front#1626\n\n**Related PRs:** none'
   expect(lint('pr-create', { title: 't', body: sectioned })).toEqual([])
-  expect(lint('pr-create', { title: 't', body: 'Fixes #12 and closes acme/front#13.\n\nUses `#14` and &#59; and front#15.\n\n' + NONE })).toEqual([])
+  expect(lint('pr-create', { title: 't', body: 'Fixes #12, closes front#13 and resolves acme/front#14.\n\nUses `#15` and `front#16` and &#59;.\n\n' + NONE })).toEqual([])
 })
 
 test('a horizontal rule is refused, a table and a rule in code are not', () => {

@@ -202,7 +202,7 @@ const NONE_ITEMS_RULE = 'a section is either `none` on its label\'s line or its 
 const LABEL_TEXT_RULE = 'a section\'s label line holds the label alone, or the label and `none`, nothing else' + DESCRIPTIONS
 const OTHER_LABEL_RULE = 'no bold label line other than the four sections, '
   + SECTIONS.map((s) => '`**' + s + ':**`').join(', ') + DESCRIPTIONS
-const REF_RULE = 'no pull request reference in the summary above the sections, `#N`, `owner/repo#N` or a pull request URL:'
+const REF_RULE = 'no pull request reference in the summary above the sections, `#N`, `repo#N`, `owner/repo#N` or a pull request URL:'
   + ' it goes in PRs Dependency or Related PRs' + DESCRIPTIONS
 const RULE_LINE_RULE = 'no horizontal rule, `---`, `***` or `___`, in a pull request description' + DESCRIPTIONS
 const NEGATIVE_RULE = 'state what the PR does, never what it does not do' + DESCRIPTIONS
@@ -210,8 +210,8 @@ const NEGATIVE_RULE = 'state what the PR does, never what it does not do' + DESC
 const HORIZONTAL_RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
 const NEGATIVE = new RegExp('(^|[^\\w])(' + NEGATIVE_PHRASES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?![\\w])', 'i')
 // A closing keyword links an issue, which GitHub reads only in the description.
-const CLOSING = /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+([\w.-]+\/[\w.-]+)?#\d+\b/gi
-const BARE_REF = /(^|[^\w&#/])#\d+\b|\b[\w.-]+\/[\w.-]+#\d+\b/
+const CLOSING = /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+([\w.-]+(\/[\w.-]+)?)?#\d+\b/gi
+const BARE_REF = /(^|[^\w&#/])#\d+\b|\b[\w.-]+(\/[\w.-]+)?#\d+\b/
 const PR_URL = /\bhttps?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/i
 
 // A line with its images and HTML tags taken out: a screenshot is never prose.
