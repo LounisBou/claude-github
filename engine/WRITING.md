@@ -74,7 +74,8 @@ Follow this exact template:
 ```
 
 The four sections are mandatory in every description, so an empty one reads as checked,
-never as forgotten. A section with nothing in it is written `none` on its label's line.
+never as forgotten. A section with nothing in it is written `none`, lowercase
+in one word, on its label's line.
 With nothing to do at deployment and no linked PR, a description ends with:
 
 ```

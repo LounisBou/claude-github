@@ -247,7 +247,7 @@ function sectionFaults(lines: string[]): string[] {
     seen.push(label.at)
     let items = 0
     for (let j = i + 1; j < lines.length && lines[j].trim() !== '' && !sectionLabel(lines[j]); j++) items++
-    const none = /^none$/i.test(label.rest)
+    const none = label.rest === 'none'
     if (label.rest !== '' && !none) faults.add(LABEL_TEXT_RULE)
     else if (none && items > 0) faults.add(NONE_ITEMS_RULE)
     else if (!none && items === 0) faults.add(EMPTY_RULE)

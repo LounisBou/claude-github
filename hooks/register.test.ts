@@ -740,6 +740,13 @@ test('a missing section, one out of order, an empty one, `none` beside items or 
   ])
 })
 
+test('an empty section is `none` in lowercase, `None` or `NONE` is refused', () => {
+  const rule = 'body: a section\'s label line holds the label alone, or the label and `none`, nothing else'
+  for (const none of ['None', 'NONE']) {
+    expect(rulesOf('pr-create', { title: 't', body: 'Adds the reset.\n\n' + NONE.replace('**Related PRs:** none', '**Related PRs:** ' + none) }), none).toEqual([rule])
+  }
+})
+
 test('a bare pull request reference in the summary is refused, the same in a section or a closing keyword is not', () => {
   const rule = 'body: no pull request reference in the summary above the sections, `#N`, `repo#N`, `owner/repo#N` or a pull request URL: it goes in PRs Dependency or Related PRs'
   for (const summary of [
