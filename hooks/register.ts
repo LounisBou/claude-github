@@ -157,7 +157,7 @@ async function permit(
  * whose title or body (inline, or the file --body-file names) breaks them is
  * refused once, as through the tool, and the same text again is put to the
  * person. A body the hook cannot see, from stdin or a command substitution, is
- * left out, and so is a file it cannot read: the command then runs as it is.
+ * left out, and so is a file it cannot read, logged: the command then runs as it is.
  */
 async function bashLint($: any, line: string): Promise<string | undefined> {
   let texts
@@ -173,8 +173,10 @@ async function bashLint($: any, line: string): Promise<string | undefined> {
     else if (text.bodyFile !== undefined) {
       try {
         args.body = String(await $.fs.read(await bodyPath($, text.bodyFile)))
-      } catch {
-        // An unreadable file is gh's to refuse.
+      } catch (err) {
+        // An unreadable file is gh's to refuse: the command runs unchecked.
+        $.ui.log('github: the writing rules could not read ' + text.bodyFile + ' and let the command through: '
+          + String((err as any)?.message ?? err))
       }
     }
     const found = lint(text.command, args, lastTyped)

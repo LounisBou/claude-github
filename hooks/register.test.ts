@@ -2273,6 +2273,23 @@ test('a body file under ~ is read from HOME, a relative one after a cd is left t
   expect(bash).toEqual([moved])
 })
 
+test('a body file the hook cannot read lets the command through, with one log line', async ($, on) => {
+  const bash: string[] = []
+  const logs: string[] = []
+  stubAsk(on, [], 'Deny')
+  on('fs.read', (_$: any, e: any) => ({ deny: 'EACCES ' + e.path }))
+  await stubGuard($, on, [], bash, logs)
+  await $.tool.call({ tool: 'Read', file_path: writingFile() })
+  logs.length = 0
+
+  const command = 'gh pr edit 3 --body-file /locked.md'
+  const out: any = await $.tool.call({ tool: 'Bash', command })
+  expect(out.deny).toBeUndefined()
+  expect(bash).toEqual([command])
+  expect(logs.length).toBe(1)
+  expect(logs[0]).toContain('/locked.md')
+})
+
 test('a body in a heredoc substitution is read and linted', async ($, on) => {
   const bash: string[] = []
   await stubBashLint($, on, bash, [], 'Deny')
