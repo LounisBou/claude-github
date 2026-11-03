@@ -116,30 +116,66 @@ export function heredocBody(line: string): string | undefined {
   return found.length === 1 ? found[0][3] : undefined
 }
 
+// The mark put before each `$` or backtick the shell expands: a word that
+// holds it after the line is read is not the text gh receives.
+const EXPANDED = ''
+
+// The line with EXPANDED before every expansion the shell makes, outside single
+// quotes and unescaped: `$name`, `${…}`, `$1`, `$(…)`, a backtick, and `$'…'`
+// outside double quotes. It adds a plain character inside a word, so the line
+// splits into the same commands and words.
+function markExpansions(line: string): string {
+  let out = ''
+  let single = false
+  let ansi = false
+  let double = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    const next = line[i + 1] ?? ''
+    if (single || ansi) {
+      if (ansi && c === '\\') { out += c + next; i++; continue }
+      if (c === "'") { single = false; ansi = false }
+      out += c
+      continue
+    }
+    if (c === '\\') { out += c + next; i++; continue }
+    if (c === "'" && !double) single = true
+    else if (c === '"') double = !double
+    else if (c === '`' || (c === '$' && /[A-Za-z0-9_{(@*#?!$-]/.test(next))) out += EXPANDED
+    else if (c === '$' && next === "'" && !double) { out += EXPANDED; ansi = true; out += c + next; i++; continue }
+    out += c
+  }
+  return out
+}
+
 // The texts the gh pr commands of a Bash line write, each with the tool's
-// subcommand whose writing rules it keeps. A body read from stdin, or one a
-// command substitution makes and no heredoc shows, is left out.
+// subcommand whose writing rules it keeps. A body read from stdin, one a
+// command substitution makes and no heredoc shows, and a title, body or file
+// a shell variable or substitution gives are left out.
 export function bashTexts(line: string): BashText[] {
   const out: BashText[] = []
   const substituted = substitutes(line)
-  for (const argv of simpleCommands(line)) {
+  const marked = simpleCommands(markExpansions(line))
+  simpleCommands(line).forEach((argv, n) => {
     const name = authoringCommand(argv)
     const gh = name?.startsWith('gh pr ') ? ghWords(argv) : undefined
     const command = gh ? LINTED_AS[gh.verb] : undefined
-    if (!gh || !command || !name) continue
+    const words = marked[n] ? ghWords(marked[n]) : undefined
+    if (!gh || !command || !name || !words) return
     const text: BashText = { name, command, argv }
-    const title = flagValue(gh.flags, '-t', '--title')
-    if (title !== undefined && (command === 'pr-create' || command === 'pr-update')) text.title = title
-    const body = flagValue(gh.flags, '-b', '--body')
-    const file = flagValue(gh.flags, '-F', '--body-file')
+    const read = (value: string | undefined) => (value === undefined || value.includes(EXPANDED) ? undefined : value)
+    const title = flagValue(words.flags, '-t', '--title')
+    if (read(title) !== undefined && (command === 'pr-create' || command === 'pr-update')) text.title = title
+    const body = flagValue(words.flags, '-b', '--body')
+    const file = flagValue(words.flags, '-F', '--body-file')
     if (body !== undefined) {
-      if (!substituted) text.body = body
-      else if (heredocBody(line) !== undefined) text.body = heredocBody(line)
-    } else if (file !== undefined && file !== '-') {
+      if (!substituted && read(body) !== undefined) text.body = body
+      else if (substituted && heredocBody(line) !== undefined) text.body = heredocBody(line)
+    } else if (read(file) !== undefined && file !== '-') {
       text.bodyFile = file
     }
     if (text.title !== undefined || text.body !== undefined || text.bodyFile !== undefined) out.push(text)
-  }
+  })
   return out
 }
 

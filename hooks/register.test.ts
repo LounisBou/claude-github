@@ -2192,6 +2192,29 @@ test('a body Bash cannot show, from stdin or a command substitution, is left to 
   expect(bash).toEqual(lines)
 })
 
+test('a title or body a shell variable or substitution gives is left to the person, a quoted or escaped $ is read', async ($, on) => {
+  const bash: string[] = []
+  await stubBashLint($, on, bash, [], 'Deny')
+
+  const lines = [
+    'gh pr create --title "$TITLE" --body "$BODY"',
+    'gh pr edit 3 --body "${BODY}"',
+    'gh pr edit 3 -b $BODY',
+    'gh pr comment 3 --body $\'Done; thanks\'',
+    'gh pr edit 3 --title "fix: x; $(date)"',
+    'gh pr edit 3 --title "fix: x; `date`"',
+  ]
+  for (const command of lines) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(bash).toEqual(lines)
+  for (const command of ['gh pr comment 3 --body "Costs \\$5; thanks"', 'gh pr comment 3 --body \'Costs $6; thanks\'']) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toContain('- body: no semicolon in prose')
+  }
+})
+
 test('a body in a heredoc substitution is read and linted', async ($, on) => {
   const bash: string[] = []
   await stubBashLint($, on, bash, [], 'Deny')
