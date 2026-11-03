@@ -801,6 +801,7 @@ test('negative phrasing in the summary is refused, the same words in a section o
   const inSection = 'Adds the reset.\n\n**TODO Staging:**\n- [ ] Check the stored data is unchanged on staging\n\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none'
   expect(lint('pr-create', { title: 't', body: inSection })).toEqual([])
   expect(lint('pr-create', { title: 't', body: 'Adds the reset, `unchanged` is a flag.\n\n' + NONE })).toEqual([])
+  expect(lint('pr-create', { title: 't', body: 'Adds the unchanged-file check and the pre-unchanged hook.\n\n' + NONE })).toEqual([])
   const typed = 'The data is unchanged.\n\n' + NONE
   expect(lint('pr-create', { title: 't', body: typed }, 'open it with this body: ' + typed)).toEqual([])
 })

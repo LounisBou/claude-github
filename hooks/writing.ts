@@ -208,7 +208,7 @@ const RULE_LINE_RULE = 'no horizontal rule, `---`, `***` or `___`, in a pull req
 const NEGATIVE_RULE = 'state what the PR does, never what it does not do' + DESCRIPTIONS
 
 const HORIZONTAL_RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
-const NEGATIVE = new RegExp('(^|[^\\w])(' + NEGATIVE_PHRASES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?![\\w])', 'i')
+const NEGATIVE = new RegExp('(?<![\\w-])(' + NEGATIVE_PHRASES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?![\\w-])', 'i')
 // A closing keyword links an issue, which GitHub reads only in the description.
 const CLOSING = /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+([\w.-]+(\/[\w.-]+)?)?#\d+\b/gi
 // A bare `#N` that is no 3- or 6-hex-digit colour, or a `repo#N` whose repository
