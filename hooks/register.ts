@@ -934,6 +934,49 @@ function typedVerbatim(text: string): boolean {
   return text.trim() !== '' && typedPrompts.some((prompt) => prompt.includes(text))
 }
 
+// The round store, one JSON file per question the operator answers:
+// read-only here, the newest files only.
+const ROUND_READ = 200
+const ROUND_ANSWERERS = ['pane', 'coordinator', 'tab']
+
+// True when some answer the operator gave in the round, about this pull request,
+// is quoted in the detail. A store or a file that cannot be read matches nothing.
+async function roundAnswered($: any, detail: string, repo: string, pr: number): Promise<boolean> {
+  try {
+    const dir = await configDir($)
+    if (!dir) return false
+    const root = dir + '/claude-orchestrator/round'
+    const named = String(repo).split('/').pop() + '#' + pr
+    const mention = new RegExp('(^|[^A-Za-z0-9_.-])' + named.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\d)', 'i')
+    const dated: Array<{ path: string; mtime: number }> = []
+    for (const entry of await $.fs.list(root)) {
+      const name = String(entry?.name ?? '')
+      if (entry?.kind === 'directory' || name.startsWith('.') || !name.endsWith('.json')) continue
+      try {
+        dated.push({ path: root + '/' + name, mtime: Number((await $.fs.stat(root + '/' + name)).mtimeMs) })
+      } catch {
+        // Not a match.
+      }
+    }
+    dated.sort((a, b) => b.mtime - a.mtime)
+    for (const { path } of dated.slice(0, ROUND_READ)) {
+      try {
+        const entry = JSON.parse(String(await $.fs.read(path)))
+        const answer = entry?.answer
+        if (!answer || !ROUND_ANSWERERS.includes(answer.by)) continue
+        const text = String(answer.text ?? '').trim()
+        if (text === '' || !detail.includes(text)) continue
+        if (mention.test(String(entry.question ?? '') + '\n' + String(entry.blocks ?? ''))) return true
+      } catch {
+        // Not a match.
+      }
+    }
+  } catch {
+    // No store: no match.
+  }
+  return false
+}
+
 async function writeRecord($: any, e: any, origin: string): Promise<{ result?: string; deny?: string; isError?: boolean }> {
   const verdict = await $.tool.check({ tool: RECORD_TOOL, input: { pr: e.pr, repo: e.repo, kind: e.kind, result: e.result, detail: e.detail } })
   if (verdict.decision === 'deny') return { deny: verdict.reason || 'refused by a permission rule' }
@@ -947,13 +990,16 @@ async function writeRecord($: any, e: any, origin: string): Promise<{ result?: s
   }
   const result = String(e.result ?? '')
   const detail = e.detail === undefined || e.detail === null ? '' : String(e.detail)
-  if (result === 'waived' && !typedVerbatim(detail)) {
-    return { deny: 'github: an E2E waiver quotes the operator: its detail must be words he typed in this session, with their date.' }
-  }
   const pr = Number(String(e.pr ?? '').replace('#', ''))
   if (!Number.isInteger(pr) || pr < 1) return { deny: 'github: name the pull request: {"pr": <n>}' }
   const repo = await targetRepo($, { repo: e.repo, args: {} })
   if (!repo) return { deny: 'github: name the repository: {"repo": "owner/name"}' }
+  if (result === 'waived' && !typedVerbatim(detail) && !(await roundAnswered($, detail, repo, pr))) {
+    return {
+      deny: 'github: an E2E waiver quotes the operator: its detail must be words he typed in this session,'
+        + ' or his answer recorded in the round about this pull request, with their date.',
+    }
+  }
   let gate: Gate
   try {
     gate = parseGate(await runGh($, 'pr-gate', { pr }, repo))
