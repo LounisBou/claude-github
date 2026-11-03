@@ -791,6 +791,19 @@ test('screenshots with a plain caption are part of a description', () => {
   expect(lint('pr-create', { title: 't', body: body.replace(', the page unchanged at 320 px', '') })).toEqual([])
 })
 
+test('an image\'s alt text, URL and HTML attributes are never read as the summary', () => {
+  for (const image of [
+    '![the page unchanged](https://github.com/user-attachments/assets/1.png)',
+    '![mobile](https://example.com/unchanged.png)',
+    '![front#12 after](https://github.com/user-attachments/assets/1.png)',
+    '![desktop](https://github.com/user-attachments/assets/1.png#12)',
+    '![mobile](assets/page#12.png)',
+    '<img alt="the page unchanged at 320 px" src="https://github.com/user-attachments/assets/2.png" width="320">',
+  ]) {
+    expect(lint('pr-create', { title: 't', body: 'Adds the reset button.\n\n' + image + '\n\n' + NONE }), image).toEqual([])
+  }
+})
+
 // ---- the tool.call hook applying them ----
 
 test('a text breaking a rule is refused with the rule, and gh.py does not run', async ($, on) => {
