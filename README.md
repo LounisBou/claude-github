@@ -201,7 +201,9 @@ The command is read as text, so a plain `ls` of the root is refused too; reading
 a record with the Read tool passes. `mcp__github__record` writes at the head the
 checkout and the pull request share, on a clean tree, one kind per caller: E2E
 for a session, the review for claude-review's hooks, the norms for the norms
-plugin's. A waiver quotes words the operator typed in the session, with their
+plugin's. A waiver quotes words the operator typed in the session, or his answer
+recorded in the round about that pull request (an E2E question, a letter answer quoted as its
+choice's text, at least 8 characters), with their
 date. Once a
 day at most, the start of a session prunes the head directories whose newest
 record is older than 90 days.
