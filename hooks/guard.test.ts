@@ -1037,6 +1037,35 @@ test('words of a few characters never carry auto-merge, typed or not', async ($,
   expect(seen.files).toEqual({})
 })
 
+test('typed words that do not name auto-merge are refused even though he typed them', async ($, on) => {
+  const seen = await world($, on)
+  const words = 'ok, lance la suite maintenant'
+  await typed($, 'thing : ' + words)
+  const out: any = await $.tool.call(setAutoMerge(true, words))
+  expect(out.deny).toContain('auto-merge')
+  expect(seen.files).toEqual({})
+  expect(seen.writes).toEqual([])
+})
+
+test('typed words naming auto-merge without the repository pass', async ($, on) => {
+  const seen = await world($, on)
+  await typed($, 'le projet est en auto-merge')
+  const out: any = await $.tool.call(setAutoMerge(true, 'le projet est en auto-merge'))
+  expect(out.deny).toBeUndefined()
+  expect(listed(seen)).toEqual(['acme/thing'])
+})
+
+for (const spelling of ['auto merge', 'automerge', 'AUTO-MERGE']) {
+  test('the word « ' + spelling + ' » names auto-merge in his words', async ($, on) => {
+    const seen = await world($, on)
+    const words = 'le projet est en ' + spelling
+    await typed($, words)
+    const out: any = await $.tool.call(setAutoMerge(true, words))
+    expect(out.deny).toBeUndefined()
+    expect(listed(seen)).toEqual(['acme/thing'])
+  })
+}
+
 test('the words match the typed prompt with its whitespace normalised', async ($, on) => {
   const seen = await world($, on)
   await typed($, 'on est en  auto-merge,\npour cette orchestration infra compris')
@@ -1052,6 +1081,20 @@ const roundAutoMerge = (question: string, text = 'oui, thing passe en auto-merge
 test('auto-merge-set may quote the operator\'s round answer about auto-merge of that repository', async ($, on) => {
   const seen = await world($, on, roundAutoMerge('Put thing in auto-merge?'))
   const out: any = await $.tool.call(setAutoMerge(true, 'oui, thing passe en auto-merge'))
+  expect(out.deny).toBeUndefined()
+  expect(listed(seen)).toEqual(['acme/thing'])
+})
+
+test('a round answer without the auto-merge word is refused', async ($, on) => {
+  const seen = await world($, on, roundAutoMerge('Put thing in auto-merge?', 'oui, thing passe en automatique'))
+  const out: any = await $.tool.call(setAutoMerge(true, 'oui, thing passe en automatique'))
+  expect(out.deny).toContain('auto-merge')
+  expect(seen.files).toEqual({})
+})
+
+test('a round answer naming auto-merge without the repository passes', async ($, on) => {
+  const seen = await world($, on, roundAutoMerge('Put thing in auto-merge?', 'le projet est en auto-merge'))
+  const out: any = await $.tool.call(setAutoMerge(true, 'le projet est en auto-merge'))
   expect(out.deny).toBeUndefined()
   expect(listed(seen)).toEqual(['acme/thing'])
 })

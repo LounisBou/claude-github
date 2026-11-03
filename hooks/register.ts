@@ -1070,6 +1070,10 @@ async function unprovenWord($: any, words: string, repo: string): Promise<string
     return 'github: auto-merge-set quotes the operator: "words" must hold at least ' + ROUND_QUOTE_MIN
       + ' characters of what he said, verbatim.'
   }
+  if (!AUTO_MERGE_WORD.test(words)) {
+    return 'github: auto-merge-set quotes the operator: "words" must name auto-merge ("auto-merge", "auto merge" or'
+      + ' "automerge"), in his own words, typed or answered in the round.'
+  }
   if (typedVerbatim(words) || await roundAnswered($, words, aboutAutoMerge(repo))) return undefined
   return 'github: auto-merge-set refused on ' + repo + ': its "words" are neither in a prompt the operator typed in'
     + ' this session, nor his answer recorded in the round to a question about auto-merge naming ' + repo.split('/')[1]
