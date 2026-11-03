@@ -350,7 +350,8 @@ hooks write `review`, the norms plugin's `norms`, any other kind refused with `g
 records are written by their producer (…)`. `waived` needs a detail found verbatim in a
 prompt the operator typed in this session, or quoting an answer he gave through the pane, the
 coordinator or a tab, as the round store (`<config dir>/claude-orchestrator/round/`)
-records it for a question naming that pull request (`repo#n`), carrying a date.
+records it for an E2E question naming that pull request (`repo#n`), carrying a date. A letter
+answer (« A », « A : … ») is quoted as its choice's text; the quoted text is at least 8 characters.
 
 ## Exit codes
 

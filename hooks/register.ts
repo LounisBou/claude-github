@@ -939,8 +939,22 @@ function typedVerbatim(text: string): boolean {
 const ROUND_READ = 200
 const ROUND_ANSWERERS = ['pane', 'coordinator', 'tab']
 
+// A waiver never rests on a few characters: the quoted text is at least this long.
+const ROUND_QUOTE_MIN = 8
+
+// What a waiver must quote of an answer: a pane answer is often a letter (« A », « A : oui »),
+// then the text of the choice it names; a letter that is not among the entry's choices is
+// nothing to quote ('').
+function roundAnswerText(entry: any, answer: string): string {
+  const letter = /^([A-Za-z])\s*(?:[:\u2014)\-.]|$)/.exec(answer)
+  if (!letter) return answer
+  const choices: any[] = Array.isArray(entry?.choices) ? entry.choices : []
+  const chosen = choices.find((choice) => String(choice?.letter ?? '').toUpperCase() === letter[1].toUpperCase())
+  return chosen ? String(chosen.text ?? '').trim() : ''
+}
+
 // True when some answer the operator gave in the round, about this pull request,
-// is quoted in the detail. A store or a file that cannot be read matches nothing.
+// is quoted whole in the detail, for an E2E question naming it. A store or a file that cannot be read matches nothing.
 async function roundAnswered($: any, detail: string, repo: string, pr: number): Promise<boolean> {
   try {
     const dir = await configDir($)
@@ -964,9 +978,10 @@ async function roundAnswered($: any, detail: string, repo: string, pr: number): 
         const entry = JSON.parse(String(await $.fs.read(path)))
         const answer = entry?.answer
         if (!answer || !ROUND_ANSWERERS.includes(answer.by)) continue
-        const text = String(answer.text ?? '').trim()
-        if (text === '' || !detail.includes(text)) continue
-        if (mention.test(String(entry.question ?? '') + '\n' + String(entry.blocks ?? ''))) return true
+        const asked = String(entry.question ?? '') + '\n' + String(entry.blocks ?? '')
+        if (!/E2E/i.test(asked) || !mention.test(asked)) continue
+        const text = roundAnswerText(entry, String(answer.text ?? '').trim())
+        if (text.length >= ROUND_QUOTE_MIN && detail.includes(text)) return true
       } catch {
         // Not a match.
       }

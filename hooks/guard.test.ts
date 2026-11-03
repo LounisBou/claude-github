@@ -828,6 +828,54 @@ test('a round answer that names another pull request does not carry a waiver', a
   expect(recordRun(seen)).toBeUndefined()
 })
 
+const CHOICE_A = 'waive the E2E, docs change only'
+const lettered = (text: string, over: Record<string, unknown> = {}) => answered({
+  choices: [{ letter: 'A', text: CHOICE_A }, { letter: 'B', text: 'run the E2E first' }],
+  answer: { text, by: 'pane', at: '2026-11-03T10:00:00Z' }, ...over,
+})
+
+test('a letter answer is resolved to its choice, quoted whole', async ($, on) => {
+  const seen = await world($, on, roundWorld({ a: lettered('A') }))
+  const out: any = await $.tool.call(waiveCall('operator chose: ' + CHOICE_A))
+  expect(out.deny).toBeUndefined()
+  expect(recordRun(seen)).toContain('waived')
+})
+
+test('a letter answer quoted as the letter alone does not carry a waiver', async ($, on) => {
+  const seen = await world($, on, roundWorld({ a: lettered('A : oui') }))
+  const out: any = await $.tool.call(waiveCall('operator answered A : oui, 2026-11-03'))
+  expect(out.deny).toContain('an E2E waiver quotes the operator')
+  expect(recordRun(seen)).toBeUndefined()
+})
+
+test('a question naming the pull request but not E2E does not carry a waiver', async ($, on) => {
+  const seen = await world($, on, roundWorld({ a: answered({ question: 'Merge thing#12 now?' }) }))
+  const out: any = await $.tool.call(waiveCall(ROUND_WORDS))
+  expect(out.deny).toContain('an E2E waiver quotes the operator')
+  expect(recordRun(seen)).toBeUndefined()
+})
+
+test('a letter that is not among the choices matches nothing', async ($, on) => {
+  const seen = await world($, on, roundWorld({ a: lettered('C: ' + CHOICE_A) }))
+  const out: any = await $.tool.call(waiveCall('operator chose: ' + CHOICE_A + ' C: ' + CHOICE_A))
+  expect(out.deny).toContain('an E2E waiver quotes the operator')
+  expect(recordRun(seen)).toBeUndefined()
+})
+
+test('a free-text answer of 8 characters or more, quoted, carries a waiver', async ($, on) => {
+  const seen = await world($, on, roundWorld({ a: answered({ answer: { text: 'no E2E ok', by: 'pane', at: 'x' } }) }))
+  const out: any = await $.tool.call(waiveCall('operator: no E2E ok'))
+  expect(out.deny).toBeUndefined()
+  expect(recordRun(seen)).toContain('waived')
+})
+
+test('a free-text answer of 3 characters does not carry a waiver', async ($, on) => {
+  const seen = await world($, on, roundWorld({ a: answered({ answer: { text: 'oui', by: 'pane', at: 'x' } }) }))
+  const out: any = await $.tool.call(waiveCall('operator said oui, 2026-11-03'))
+  expect(out.deny).toContain('an E2E waiver quotes the operator')
+  expect(recordRun(seen)).toBeUndefined()
+})
+
 for (const [label, entry] of [
   ['no answer yet', answered({ answer: null })],
   ['an answer given by the sender', answered({}, 'sender')],
