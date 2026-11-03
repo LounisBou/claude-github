@@ -56,6 +56,8 @@ it. `/github:doctor` then confirms everything is ready.
   label, and in its summary no pull request reference and no negative phrasing
   from a fixed list. The same rules hold for `gh pr create`, `gh pr edit`,
   `gh pr comment` and `gh pr review` run through Bash, their `--body-file` read.
+  A `--body` read from stdin or made by a command substitution other than a
+  `$(cat <<'EOF' … EOF)` heredoc is left unchecked, as the hook cannot see it.
   A text that breaks one is refused with the rule, so it can be rewritten. A
   text the user typed in the prompt passes, and the same text sent again is
   put to the user. `pr-create` opens a draft unless the call says otherwise,

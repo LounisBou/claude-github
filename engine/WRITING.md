@@ -91,8 +91,8 @@ a prerequisite positively ("X must have Y set", not "it will fail without Y"). T
 plugin refuses, through its tool and through the shell alike, in the summary, the phrasings that say what the PR does not do:
 "unchanged", "no dependency", "does not", "doesn't", "is not changed", "left untouched",
 "no other pull request", "without conflict". The summary names no pull request: no
-`#N`, no `owner/repo#N`, no pull request URL above the sections, as links go in
-`PRs Dependency` or `Related PRs`. No horizontal rule (`---`, `***`, `___`) and no bold
+`#N`, no `repo#N`, no `owner/repo#N`, no pull request URL above the sections, as links
+go in `PRs Dependency` or `Related PRs`, a closing keyword such as `Fixes #12` excepted. No horizontal rule (`---`, `***`, `___`) and no bold
 label line other than the four sections, anywhere in the description.
 The four sections come after the summary text, in that order, each in that exact shape
 whatever the number of items: the bold label alone on its line, then one item per line,
@@ -129,8 +129,10 @@ The description of the operator's own draft PR is published and edited without a
 A colleague's PR and any review comment are proposed first.
 
 A paragraph stating the ship order is always added to a description, without asking:
-add, re-read, report in one line. Every (#N) written in a description comes from PR
-#N's own files and body, never by eye. A TODO goes only on the PR that enables its
+add, re-read, report in one line. It names no pull request, it points to the sections
+(« Ships after the PRs in PRs Dependency », « Ships in any order with the Related
+PRs »), and every (#N) goes in `PRs Dependency` or `Related PRs`. Every (#N) written in
+those sections comes from PR #N's own files and body, never by eye. A TODO goes only on the PR that enables its
 step: it runs when that PR ships.
 
 A pull request that changes an interface carries screenshots of what it changes,
