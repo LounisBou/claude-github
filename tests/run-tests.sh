@@ -1077,9 +1077,9 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.12.1" \
+check "manifest version" "0.12.2" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.12.1 0.12.1" \
+check "marketplace version matches" "0.12.2 0.12.2" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
@@ -1678,7 +1678,8 @@ check_status "a stdin json body arrives byte-identical" 0 cmp -s "$BODY" "$WORK/
 check_status "stdin that is not JSON exits 1" 1 \
   sh -c "printf 'nope' | env GH_FIXTURES='$F6' GH_TOKEN=x python3 '$GHDIR/gh.py' --stdin-json"
 
-# The mod's command enum is a static list; it must name exactly the engine's.
+# The mod's command enum is a static list; it must name exactly the engine's
+# subcommands and the mod's own (MOD_COMMANDS), which the engine never sees.
 enum_drift=$(python3 - "$GHDIR" "$ROOT/hooks/register.ts" <<'PYENUM'
 import re, sys
 sys.path.insert(0, sys.argv[1])
@@ -1690,7 +1691,10 @@ if "export const COMMANDS = [" not in src:
     sys.exit()
 block = src.split("export const COMMANDS = [", 1)[1].split("]", 1)[0]
 names = set(re.findall(r"'([a-z-]+)'", block))
-print(" ".join(sorted(subs ^ names)))
+own = set()
+if "export const MOD_COMMANDS = new Set([" in src:
+    own = set(re.findall(r"'([a-z-]+)'", src.split("export const MOD_COMMANDS = new Set([", 1)[1].split("]", 1)[0]))
+print(" ".join(sorted((subs | own) ^ names | (own & subs))))
 PYENUM
 )
 check "the mod's COMMANDS match the engine's subcommands" "" "$enum_drift"

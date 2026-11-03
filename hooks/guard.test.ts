@@ -10,6 +10,7 @@ const MOVED = 'fedcba9876543210fedcba9876543210fedcba98'
 const RECORDS = '/cfg/pr-records'
 const HEAD_DIR = RECORDS + '/acme/thing/' + HEAD
 const WARN_LOG = '/data/guard-warn.log'
+const AUTO_MERGE = '/data/auto-merge.json'
 
 let sessions = 0
 
@@ -37,12 +38,18 @@ type World = {
   warnLog?: string
   // The files and directories $.fs sees beside the records, by path.
   tree?: Record<string, { kind: 'file' | 'directory'; mtimeMs: number; text?: string }>
+  // The move that puts a new auto-merge.json in place fails with this stderr.
+  mvFails?: string
 }
 
 type Seen = {
   runs: any[]; asked: string[]; logs: string[]; writes: Array<{ path: string; text: string }>; bash: string[]
   // guard-warn.log's text as the disk holds it, when the world starts with one.
   warnLog?: string
+  // The files of the plugin's data directory, guard-warn.log apart, by path.
+  files: Record<string, string>
+  // The context each prompt entered with.
+  contexts: string[][]
 }
 
 function record(kind: string, result: string, at = '2026-11-01T10:00:00Z', over: Record<string, unknown> = {}): [string, string] {
@@ -61,7 +68,8 @@ function gateOf(w: World) {
 }
 
 async function world($: any, on: any, w: World = {}): Promise<Seen> {
-  const seen: Seen = { runs: [], asked: [], logs: [], writes: [], bash: [], warnLog: w.warnLog }
+  const seen: Seen = { runs: [], asked: [], logs: [], writes: [], bash: [], warnLog: w.warnLog, files: {}, contexts: [] }
+  if (w.autoMerge !== undefined) seen.files[AUTO_MERGE] = JSON.stringify({ repositories: w.autoMerge })
   const session = 'guard-session-' + ++sessions
   const records = w.records ?? FOUR
   const env: Record<string, string> = { CLAUDE_CONFIG_DIR: '/cfg', CLAUDE_PLUGIN_DATA: '/data', HOME: '/home/x' }
@@ -85,12 +93,15 @@ async function world($: any, on: any, w: World = {}): Promise<Seen> {
   })
   for (const tool of ['Write', 'Edit', 'MultiEdit']) on('tool.call', { tool }, () => ({ result: 'written' }))
   on('env.get', (_$: any, e: any) => ({ value: e.name === ENFORCE_ENV ? (enforcing ? '1' : undefined) : env[e.name] }))
-  on('prompt.submit', (_$: any, e: any) => ({ text: e.text }))
+  on('prompt.submit', (_$: any, e: any) => {
+    seen.contexts.push([...(e.context ?? [])])
+    return { text: e.text }
+  })
   on('ui.log', (_$: any, e: any) => {
     seen.logs.push(e.text)
     return { value: undefined }
   })
-  on('fs.exists', (_$: any, e: any) => ({ value: e.path in tree || (e.path === '/data/auto-merge.json' && w.autoMerge !== undefined) }))
+  on('fs.exists', (_$: any, e: any) => ({ value: e.path in tree || e.path in seen.files }))
   on('fs.stat', (_$: any, e: any) => (e.path === WARN_LOG && seen.warnLog !== undefined
     ? { value: { kind: 'file', size: seen.warnLog.length, mtimeMs: 0, isLink: false } }
     : e.path in tree ? { value: { kind: tree[e.path].kind, size: 0, mtimeMs: tree[e.path].mtimeMs, isLink: false } } : { deny: 'ENOENT ' + e.path }))
@@ -103,7 +114,7 @@ async function world($: any, on: any, w: World = {}): Promise<Seen> {
     return { deny: 'ENOENT ' + e.path }
   })
   on('fs.read', (_$: any, e: any) => {
-    if (e.path === '/data/auto-merge.json') return { value: JSON.stringify({ repositories: w.autoMerge ?? [] }) }
+    if (e.path in seen.files) return { value: seen.files[e.path] }
     if (tree[e.path]?.text !== undefined) return { value: tree[e.path].text }
     if (e.path.startsWith(HEAD_DIR + '/')) {
       const name = e.path.slice(HEAD_DIR.length + 1)
@@ -114,12 +125,24 @@ async function world($: any, on: any, w: World = {}): Promise<Seen> {
   on('fs.write', (_$: any, e: any) => {
     seen.writes.push({ path: e.path, text: e.text })
     if (e.path === WARN_LOG && seen.warnLog !== undefined) seen.warnLog = e.text
+    else if (e.path !== WARN_LOG && e.path.startsWith('/data/')) seen.files[e.path] = e.text
     return { value: undefined }
   })
   on('process.run', (_$: any, e: any) => {
     if (e.argv.includes(WARN_LOG)) {
       seen.runs.push({ argv: e.argv })
       if (seen.warnLog !== undefined && /cat >> /.test(e.argv.join(' '))) seen.warnLog += String(e.init?.stdin ?? '')
+      return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    }
+    if (e.argv[0] === 'mv' || e.argv[0] === 'rm' || e.argv[0] === 'mkdir') {
+      seen.runs.push({ argv: e.argv })
+      const [from, to] = e.argv.slice(-2)
+      if (e.argv[0] === 'mv') {
+        if (w.mvFails) return { value: { exitCode: 1, stdout: '', stderr: w.mvFails } }
+        seen.files[to] = seen.files[from]
+        delete seen.files[from]
+      }
+      if (e.argv[0] === 'rm') delete seen.files[to]
       return { value: { exitCode: 0, stdout: '', stderr: '' } }
     }
     const stdin = JSON.parse(e.init?.stdin ?? '{}')
@@ -965,4 +988,263 @@ test('a stamp from today prunes nothing', async ($, on) => {
   const seen = await world($, on, { tree })
   expect(seen.runs).toEqual([])
   expect(seen.writes).toEqual([])
+})
+
+// ---- auto-merge on the operator's word ----
+
+const HIS_WORDS = 'on est en auto-merge, pour cette orchestration infra compris'
+const typed = ($: any, text: string, kind = 'composer') => $.prompt.submit({ text, origin: { kind }, wait: false })
+const setAutoMerge = (on: boolean, words: string, repo = 'acme/thing') =>
+  gh('auto-merge-set', { repo, on, words }, undefined as any)
+const listed = (seen: Seen) => JSON.parse(seen.files[AUTO_MERGE]).repositories
+
+test('auto-merge-set on with words the operator typed lists the repository, and its pr-ready asks nothing', async ($, on) => {
+  const seen = await world($, on, { verdict: { decision: 'ask' } })
+  await typed($, 'thing : ' + HIS_WORDS)
+  const set: any = await $.tool.call(setAutoMerge(true, HIS_WORDS))
+  expect(set.deny).toBeUndefined()
+  expect(set.isError).toBeUndefined()
+  expect(listed(seen)).toEqual(['acme/thing'])
+  const ready: any = await $.tool.call(gh('pr-ready', { pr: 12 }))
+  expect(ready.deny).toBeUndefined()
+  expect(seen.asked).toEqual([])
+  expect(commands(seen)).toContain('pr-ready')
+})
+
+test('auto-merge-set with words the operator never typed is refused, naming both proofs, and writes nothing', async ($, on) => {
+  const seen = await world($, on)
+  await typed($, 'something else entirely')
+  const out: any = await $.tool.call(setAutoMerge(true, HIS_WORDS))
+  expect(out.deny).toContain('typed in this session')
+  expect(out.deny).toContain('recorded in the round')
+  expect(seen.files).toEqual({})
+  expect(seen.writes).toEqual([])
+})
+
+test('a peer message is not the operator\'s word', async ($, on) => {
+  const seen = await world($, on)
+  await typed($, HIS_WORDS, 'peer')
+  const out: any = await $.tool.call(setAutoMerge(true, HIS_WORDS))
+  expect(out.deny).toContain('typed in this session')
+  expect(seen.files).toEqual({})
+})
+
+test('words of a few characters never carry auto-merge, typed or not', async ($, on) => {
+  const seen = await world($, on)
+  await typed($, 'oui')
+  const out: any = await $.tool.call(setAutoMerge(true, 'oui'))
+  expect(out.deny).toContain('at least 8 characters')
+  expect(seen.files).toEqual({})
+})
+
+test('typed words that do not name auto-merge are refused even though he typed them', async ($, on) => {
+  const seen = await world($, on)
+  const words = 'ok, lance la suite maintenant'
+  await typed($, 'thing : ' + words)
+  const out: any = await $.tool.call(setAutoMerge(true, words))
+  expect(out.deny).toContain('auto-merge')
+  expect(seen.files).toEqual({})
+  expect(seen.writes).toEqual([])
+})
+
+test('typed words naming auto-merge without the repository pass', async ($, on) => {
+  const seen = await world($, on)
+  await typed($, 'le projet est en auto-merge')
+  const out: any = await $.tool.call(setAutoMerge(true, 'le projet est en auto-merge'))
+  expect(out.deny).toBeUndefined()
+  expect(listed(seen)).toEqual(['acme/thing'])
+})
+
+for (const spelling of ['auto merge', 'automerge', 'AUTO-MERGE']) {
+  test('the word « ' + spelling + ' » names auto-merge in his words', async ($, on) => {
+    const seen = await world($, on)
+    const words = 'le projet est en ' + spelling
+    await typed($, words)
+    const out: any = await $.tool.call(setAutoMerge(true, words))
+    expect(out.deny).toBeUndefined()
+    expect(listed(seen)).toEqual(['acme/thing'])
+  })
+}
+
+test('the words match the typed prompt with its whitespace normalised', async ($, on) => {
+  const seen = await world($, on)
+  await typed($, 'on est en  auto-merge,\npour cette orchestration infra compris')
+  const out: any = await $.tool.call(setAutoMerge(true, HIS_WORDS))
+  expect(out.deny).toBeUndefined()
+  expect(listed(seen)).toEqual(['acme/thing'])
+})
+
+const roundAutoMerge = (question: string, text = 'oui, thing passe en auto-merge') => ({
+  ...roundWorld({ a: { question, blocks: null, status: 'answered', answer: { text, by: 'coordinator', at: '2026-11-03T10:00:00Z' } } }),
+})
+
+test('auto-merge-set may quote the operator\'s round answer about auto-merge of that repository', async ($, on) => {
+  const seen = await world($, on, roundAutoMerge('Put thing in auto-merge?'))
+  const out: any = await $.tool.call(setAutoMerge(true, 'oui, thing passe en auto-merge'))
+  expect(out.deny).toBeUndefined()
+  expect(listed(seen)).toEqual(['acme/thing'])
+})
+
+test('a round answer without the auto-merge word is refused', async ($, on) => {
+  const seen = await world($, on, roundAutoMerge('Put thing in auto-merge?', 'oui, thing passe en automatique'))
+  const out: any = await $.tool.call(setAutoMerge(true, 'oui, thing passe en automatique'))
+  expect(out.deny).toContain('auto-merge')
+  expect(seen.files).toEqual({})
+})
+
+test('a round answer naming auto-merge without the repository passes', async ($, on) => {
+  const seen = await world($, on, roundAutoMerge('Put thing in auto-merge?', 'le projet est en auto-merge'))
+  const out: any = await $.tool.call(setAutoMerge(true, 'le projet est en auto-merge'))
+  expect(out.deny).toBeUndefined()
+  expect(listed(seen)).toEqual(['acme/thing'])
+})
+
+for (const [label, question] of [
+  ['another repository', 'Put other in auto-merge?'],
+  ['no auto-merge', 'Merge thing#12 now?'],
+] as const) {
+  test('a round answer to a question naming ' + label + ' does not carry auto-merge', async ($, on) => {
+    const seen = await world($, on, roundAutoMerge(question))
+    const out: any = await $.tool.call(setAutoMerge(true, 'oui, thing passe en auto-merge'))
+    expect(out.deny).toContain('recorded in the round')
+    expect(seen.files).toEqual({})
+  })
+}
+
+test('auto-merge-set off takes the repository out, whatever its case, and its pr-ready is asked again', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['Acme/Thing', 'acme/other'] })
+  const words = 'thing sort de l\'auto-merge'
+  await typed($, words)
+  const out: any = await $.tool.call(setAutoMerge(false, words))
+  expect(out.deny).toBeUndefined()
+  expect(listed(seen)).toEqual(['acme/other'])
+  await $.tool.call(gh('pr-ready', { pr: 12 }))
+  expect(seen.asked.length).toBe(1)
+  expect(seen.asked[0]).toContain('out of draft')
+})
+
+test('the list is written whole to a temporary file then moved in place, leaving no temporary file', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/other'] })
+  await typed($, HIS_WORDS)
+  await $.tool.call(setAutoMerge(true, HIS_WORDS))
+  const written = seen.writes.filter((x) => x.path.startsWith('/data/'))
+  expect(written.length).toBe(1)
+  expect(written[0].path).not.toBe(AUTO_MERGE)
+  expect(seen.runs.some((r) => r.argv?.[0] === 'mv' && r.argv.includes(written[0].path) && r.argv.at(-1) === AUTO_MERGE)).toBe(true)
+  expect(Object.keys(seen.files)).toEqual([AUTO_MERGE])
+  expect(JSON.parse(seen.files[AUTO_MERGE])).toEqual({ repositories: ['acme/other', 'acme/thing'] })
+})
+
+test('a move that fails removes the temporary file and leaves the list as it was', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/other'], mvFails: 'EACCES' })
+  await typed($, HIS_WORDS)
+  const out: any = await $.tool.call(setAutoMerge(true, HIS_WORDS))
+  expect(out.isError).toBe(true)
+  expect(out.result).toContain('EACCES')
+  expect(Object.keys(seen.files)).toEqual([AUTO_MERGE])
+  expect(listed(seen)).toEqual(['acme/other'])
+})
+
+test('a malformed list is never overwritten', async ($, on) => {
+  const seen = await world($, on)
+  seen.files[AUTO_MERGE] = '{"repositories": [1]}'
+  await typed($, HIS_WORDS)
+  const out: any = await $.tool.call(setAutoMerge(true, HIS_WORDS))
+  expect(out.isError).toBe(true)
+  expect(seen.files[AUTO_MERGE]).toBe('{"repositories": [1]}')
+})
+
+test('auto-merge-set refuses a repository that is not owner/name', async ($, on) => {
+  const seen = await world($, on)
+  await typed($, HIS_WORDS)
+  const out: any = await $.tool.call(setAutoMerge(true, HIS_WORDS, 'thing'))
+  expect(out.deny).toContain('owner/name')
+  expect(seen.files).toEqual({})
+})
+
+test('auto-merge-set denied by a permission rule is refused', async ($, on) => {
+  const seen = await world($, on, { verdict: { decision: 'deny', reason: 'no' } })
+  await typed($, HIS_WORDS)
+  const out: any = await $.tool.call(setAutoMerge(true, HIS_WORDS))
+  expect(out.deny).toBe('no')
+  expect(seen.files).toEqual({})
+})
+
+test('auto-merge-list prints the repositories in auto-merge', async ($, on) => {
+  await world($, on, { autoMerge: ['acme/thing', 'acme/other'] })
+  const out: any = await $.tool.call(gh('auto-merge-list', {}, undefined as any))
+  expect(out.result).toBe('acme/thing\nacme/other')
+})
+
+test('auto-merge-list with no file says so', async ($, on) => {
+  await world($, on)
+  const out: any = await $.tool.call(gh('auto-merge-list', {}, undefined as any))
+  expect(out.result).toBe('no repository in auto-merge')
+})
+
+for (const command of [
+  'echo \'{"repositories":["a/b"]}\' > /data/auto-merge.json',
+  'cd ~/.claude/plugins/data/github-lounisbou && jq . auto-merge.json > x && mv x auto-merge.json',
+]) {
+  test('a Bash command that names the auto-merge list is refused: ' + command.slice(0, 30), async ($, on) => {
+    const seen = await world($, on)
+    const out: any = await $.tool.call(bash(command))
+    expect(out.deny).toContain('auto-merge-set')
+    expect(seen.bash).toEqual([])
+  })
+}
+
+for (const [tool, path] of [
+  ['Write', AUTO_MERGE], ['Edit', AUTO_MERGE], ['Write', '/home/x/.claude/plugins/data/github-lounisbou/auto-merge.json'],
+] as const) {
+  test('a ' + tool + ' of the auto-merge list is refused: ' + path, async ($, on) => {
+    await world($, on)
+    const out: any = await $.tool.call({ tool, file_path: path, content: '{}', old_string: 'a', new_string: 'b' } as any)
+    expect(out.deny).toContain('auto-merge-set')
+  })
+}
+
+test('a Bash command that names the file outside the plugins\' data goes through', async ($, on) => {
+  const seen = await world($, on)
+  const out: any = await $.tool.call(bash('grep -n auto-merge.json README.md'))
+  expect(out.deny).toBeUndefined()
+  expect(seen.bash).toEqual(['grep -n auto-merge.json README.md'])
+})
+
+test('a Write of another auto-merge.json, outside the plugins\' data, goes through', async ($, on) => {
+  await world($, on)
+  const out: any = await $.tool.call({ tool: 'Write', file_path: '/work/fixtures/auto-merge.json', content: '{}' } as any)
+  expect(out.deny).toBeUndefined()
+})
+
+// ---- the operator speaks of auto-merge ----
+
+test('a typed prompt that speaks of auto-merge enters with the line to call auto-merge-set and today\'s list', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/other'] })
+  await typed($, 'le projet est en auto-merge')
+  const context = seen.contexts.at(-1) ?? []
+  expect(context.length).toBe(1)
+  expect(context[0]).toContain('auto-merge-set')
+  expect(context[0]).toContain('verbatim')
+  expect(context[0]).toContain('acme/other')
+})
+
+for (const text of ['passe infra en Auto Merge', 'AUTOMERGE pour tout']) {
+  test('every spelling of auto-merge is heard: ' + text, async ($, on) => {
+    const seen = await world($, on)
+    await typed($, text, 'bridge')
+    expect((seen.contexts.at(-1) ?? []).join('')).toContain('auto-merge-set')
+  })
+}
+
+test('a peer message that speaks of auto-merge adds no line', async ($, on) => {
+  const seen = await world($, on)
+  await typed($, 'le projet est en auto-merge', 'peer')
+  expect(seen.contexts.at(-1)).toEqual([])
+})
+
+test('a typed prompt that does not speak of auto-merge adds no line', async ($, on) => {
+  const seen = await world($, on)
+  await typed($, 'merge it when green')
+  expect(seen.contexts.at(-1)).toEqual([])
 })

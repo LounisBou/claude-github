@@ -63,6 +63,9 @@ it. `/github:doctor` then confirms everything is ready.
   lacks them. `pr-create` labels the new pull request (`Not Ready` for a draft,
   `Ready` otherwise) and `pr-ready` puts `Ready` on it, so the label says what
   the draft flag says. A label failure never fails the command it follows.
+- **Auto-merge list** — `auto-merge-set` puts a repository in auto-merge or
+  takes it out, on the operator's words quoted verbatim, and `auto-merge-list`
+  prints the list (below).
 - **`/checks [pr]`** — combined CI status of a PR, with the failed checks
   named, defaulting to the current branch's.
 - **`/threads [pr]`** — the open review threads of a PR, as a markdown table.
@@ -105,7 +108,14 @@ dialog nobody answers in a repository that merges on its own. A deny rule
 still refuses, an ask from an explicit rule still asks, and the writing
 rules still apply. Elsewhere every write is asked as before. An absent file
 lists no repository; an unreadable or malformed one lists none either and
-says so in one transcript line. The plugin never writes the file.
+says so in one transcript line.
+
+The list changes only through the tool, on the operator's word:
+`auto-merge-set {"repo": "owner/name", "on": true|false, "words": "<his words>"}`
+adds or removes a repository when `words` is found verbatim in a prompt he typed
+or in his answer recorded in the round, and `auto-merge-list` prints it. A Write,
+an Edit or a shell command on the file is refused. A prompt he types that speaks
+of auto-merge reminds the session to call `auto-merge-set`.
 
 ## Ready pull requests
 

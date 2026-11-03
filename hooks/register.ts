@@ -19,9 +19,9 @@ import {
 
 export const PANE_ID = 'github-prs'
 
-// The gh.py subcommands, for the tool's command enum. gh.py itself maps the
-// arguments (--stdin-json); tests/run-tests.sh fails when this list and the
-// engine's parser disagree.
+// The tool's subcommands, for its command enum: gh.py's, which it maps itself
+// (--stdin-json), and the mod's own (MOD_COMMANDS), answered here.
+// tests/run-tests.sh fails when this list and the two sources disagree.
 export const COMMANDS = [
   'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-gate', 'pr-diff', 'pr-files',
   'pr-commits', 'file-at-ref', 'pr-create', 'pr-merge', 'pr-threads',
@@ -32,8 +32,12 @@ export const COMMANDS = [
   'review-pending-add', 'review-pending', 'repo-review-comments', 'pr-update',
   'pr-ready', 'pr-draft', 'label-add', 'label-remove', 'reviewer-add', 'reviewer-remove',
   'assignee-add', 'assignee-remove', 'labels-ensure', 'pr-readiness', 'issue-view', 'issue-list',
-  'issue-search', 'pr-linked-issues', 'image-upload', 'auth-check',
+  'issue-search', 'pr-linked-issues', 'image-upload', 'auth-check', 'auto-merge-set', 'auto-merge-list',
 ]
+
+// The subcommands this module answers without the engine: the list of
+// repositories in auto-merge is a file on this machine, not GitHub's.
+export const MOD_COMMANDS = new Set(['auto-merge-set', 'auto-merge-list'])
 
 // The subcommands that only read. Every other one writes to GitHub, and a
 // command missing here is treated as a write, so the safe side is the default.
@@ -41,7 +45,7 @@ export const READS = new Set([
   'pr-get', 'pr-list', 'pr-status', 'pr-checks', 'pr-gate', 'pr-diff', 'pr-files', 'pr-commits',
   'file-at-ref', 'pr-threads', 'pr-comments', 'pr-issue-comments', 'pr-reviews',
   'comment-resolved', 'comments-resolved-batch', 'review-pending', 'repo-review-comments',
-  'issue-view', 'issue-list', 'issue-search', 'pr-linked-issues', 'auth-check',
+  'issue-view', 'issue-list', 'issue-search', 'pr-linked-issues', 'auth-check', 'auto-merge-list',
 ])
 
 export const TOOL = 'mcp__github__gh'
@@ -262,36 +266,63 @@ export function reservedToPerson(command: string, args: Record<string, unknown>,
 }
 
 // The repositories in auto-merge, as owner/name: there no write is put to the
-// person. The file is the operator's, in the
-// host's data directory for this plugin, and nothing here ever writes it.
+// person. The file is the operator's, in the host's data directory for this
+// plugin; it changes only through auto-merge-set, on his quoted word.
 export const AUTO_MERGE_FILE = 'auto-merge.json'
+// Auto-merge as the operator writes it: « auto-merge », « auto merge », « automerge ».
+export const AUTO_MERGE_WORD = /auto[-\s]?merge/i
+// The list's path in any plugin's data directory, for the Write and Edit guard.
+const AUTO_MERGE_PATH = /\/\.claude\/plugins\/data\/[^/]+\/auto-merge\.json$/
+export const AUTO_MERGE_REFUSAL = 'github: the auto-merge list changes only through mcp__github__gh auto-merge-set,'
+  + ' on the operator\'s words quoted verbatim ({"repo": "owner/name", "on": true|false, "words": "..."});'
+  + ' auto-merge-list prints it.'
 // The data directory under HOME when the host does not name it.
 export const DATA_UNDER_HOME = '/.claude/plugins/data/github-lounisbou'
 // The forms of a GitHub origin URL, as engine/ghlib/repo.py reads them.
 const GITHUB_ORIGIN = /(?:git@github\.com:|https:\/\/github\.com\/)([^/]+)\/(.+?)(?:\.git)?$/
 
-// The listed repositories, lowercased. An absent file lists none, and so does
-// an unreadable or malformed one, which also says so in one log line.
 // The plugin's data directory: the host's, else the one under HOME, else ''.
 async function dataDir($: any): Promise<string> {
   const home = await $.env.get('HOME')
   return (await $.env.get('CLAUDE_PLUGIN_DATA')) || (home ? home + DATA_UNDER_HOME : '')
 }
 
-async function autoMergeRepos($: any): Promise<Set<string>> {
-  let path = ''
+// A list that is there but cannot be read, with its path.
+class UnreadList extends Error {
+  constructor(readonly path: string, why: string) {
+    super(path + ': ' + why)
+  }
+}
+
+// The file as it stands: its path, its object and its list as written. An
+// absent file is an empty list; an unreadable or malformed one throws UnreadList.
+async function readAutoMerge($: any): Promise<{ path: string; data: Record<string, unknown>; listed: string[] }> {
+  const dir = await dataDir($)
+  if (!dir) throw new Error('the plugin has no data directory: neither CLAUDE_PLUGIN_DATA nor HOME is set')
+  const path = dir + '/' + AUTO_MERGE_FILE
+  if (!(await $.fs.exists(path))) return { path, data: { repositories: [] }, listed: [] }
+  let data: any
   try {
-    const dir = await dataDir($)
-    if (!dir) return new Set()
-    path = dir + '/' + AUTO_MERGE_FILE
-    if (!(await $.fs.exists(path))) return new Set()
-    const listed = JSON.parse(String(await $.fs.read(path))).repositories
-    if (!Array.isArray(listed) || !listed.every((r) => typeof r === 'string')) {
-      throw new Error('"repositories" is not a list of owner/name strings')
-    }
-    return new Set(listed.map((r: string) => r.trim().toLowerCase()))
+    data = JSON.parse(String(await $.fs.read(path)))
   } catch (err: any) {
-    if (path) $.ui.log('github: ' + path + ' unread, every write is asked: ' + String(err?.message ?? err))
+    throw new UnreadList(path, String(err?.message ?? err))
+  }
+  const listed = data?.repositories
+  if (!Array.isArray(listed) || !listed.every((r) => typeof r === 'string')) {
+    throw new UnreadList(path, '"repositories" is not a list of owner/name strings')
+  }
+  return { path, data, listed }
+}
+
+// The listed repositories, lowercased. An absent file lists none, and so does
+// an unreadable or malformed one, which also says so in one log line.
+async function autoMergeRepos($: any): Promise<Set<string>> {
+  try {
+    return new Set((await readAutoMerge($)).listed.map((r) => r.trim().toLowerCase()))
+  } catch (err: any) {
+    if (err instanceof UnreadList) {
+      $.ui.log('github: ' + err.path + ' unread, every write is asked: ' + err.message.slice(err.path.length + 2))
+    }
     return new Set()
   }
 }
@@ -923,15 +954,27 @@ async function followPushes($: any, line: string): Promise<void> {
   }
 }
 
-// ---- records ----
+// ---- the operator's word ----
 
 // The prompts the person typed in this session, at the terminal or through
-// the bridge: an E2E waiver quotes one of them.
+// the bridge: an E2E waiver and auto-merge-set quote one of them.
 const typedPrompts: string[] = []
 const TYPED_KEPT = 200
 
+// A text with its runs of whitespace made one space: a quote keeps the words, not the line breaks.
+function spaced(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
 function typedVerbatim(text: string): boolean {
-  return text.trim() !== '' && typedPrompts.some((prompt) => prompt.includes(text))
+  const quoted = spaced(text)
+  return quoted !== '' && typedPrompts.some((prompt) => spaced(prompt).includes(quoted))
+}
+
+// A word of the round's questions as a whole word: no letter, digit, dot or
+// dash on its left, and on its right none of what tail excludes.
+function mentionOf(named: string, tail: string): RegExp {
+  return new RegExp('(^|[^A-Za-z0-9_.-])' + named.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + tail, 'i')
 }
 
 // The round store, one JSON file per question the operator answers:
@@ -953,15 +996,25 @@ function roundAnswerText(entry: any, answer: string): string {
   return chosen ? String(chosen.text ?? '').trim() : ''
 }
 
-// True when some answer the operator gave in the round, about this pull request,
-// is quoted whole in the detail, for an E2E question naming it. A store or a file that cannot be read matches nothing.
-async function roundAnswered($: any, detail: string, repo: string, pr: number): Promise<boolean> {
+// The round questions an E2E waiver of this pull request may answer.
+function aboutE2E(repo: string, pr: number): RegExp[] {
+  return [/E2E/i, mentionOf(String(repo).split('/').pop() + '#' + pr, '(?!\\d)')]
+}
+
+// The round questions that may put this repository in or out of auto-merge.
+function aboutAutoMerge(repo: string): RegExp[] {
+  return [AUTO_MERGE_WORD, mentionOf(String(repo).split('/').pop() ?? '', '(?![A-Za-z0-9_-])')]
+}
+
+// True when some answer the operator gave in the round, to a question every
+// pattern of about matches, is quoted whole in the text, its whitespace
+// normalised. A store or a file that cannot be read matches nothing.
+async function roundAnswered($: any, quote: string, about: RegExp[]): Promise<boolean> {
+  const detail = spaced(quote)
   try {
     const dir = await configDir($)
     if (!dir) return false
     const root = dir + '/claude-orchestrator/round'
-    const named = String(repo).split('/').pop() + '#' + pr
-    const mention = new RegExp('(^|[^A-Za-z0-9_.-])' + named.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\d)', 'i')
     const dated: Array<{ path: string; mtime: number }> = []
     for (const entry of await $.fs.list(root)) {
       const name = String(entry?.name ?? '')
@@ -979,8 +1032,8 @@ async function roundAnswered($: any, detail: string, repo: string, pr: number): 
         const answer = entry?.answer
         if (!answer || !ROUND_ANSWERERS.includes(answer.by)) continue
         const asked = String(entry.question ?? '') + '\n' + String(entry.blocks ?? '')
-        if (!/E2E/i.test(asked) || !mention.test(asked)) continue
-        const text = roundAnswerText(entry, String(answer.text ?? '').trim())
+        if (!about.every((pattern) => pattern.test(asked))) continue
+        const text = spaced(roundAnswerText(entry, String(answer.text ?? '').trim()))
         if (text.length >= ROUND_QUOTE_MIN && detail.includes(text)) return true
       } catch {
         // Not a match.
@@ -991,6 +1044,100 @@ async function roundAnswered($: any, detail: string, repo: string, pr: number): 
   }
   return false
 }
+
+// ---- auto-merge on the operator's word ----
+
+// Whether a Bash command line names the list where it lives: its file name
+// with the plugin's data directory, any plugin's, or the variable naming it.
+// The name alone, in this plugin's sources or a message, is no path.
+async function touchesAutoMerge($: any, line: string): Promise<boolean> {
+  if (!line.includes(AUTO_MERGE_FILE)) return false
+  const dir = await dataDir($)
+  return (dir !== '' && line.includes(dir)) || /plugins\/data\/|CLAUDE_PLUGIN_DATA|github-lounisbou/.test(line)
+}
+
+const REPO_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+
+// The list, one repository per line as written.
+async function listAutoMerge($: any): Promise<string> {
+  const { listed } = await readAutoMerge($)
+  return listed.length > 0 ? listed.join('\n') : 'no repository in auto-merge'
+}
+
+// The refusal of an auto-merge-set whose words are not the operator's, or undefined.
+async function unprovenWord($: any, words: string, repo: string): Promise<string | undefined> {
+  if (spaced(words).length < ROUND_QUOTE_MIN) {
+    return 'github: auto-merge-set quotes the operator: "words" must hold at least ' + ROUND_QUOTE_MIN
+      + ' characters of what he said, verbatim.'
+  }
+  if (!AUTO_MERGE_WORD.test(words)) {
+    return 'github: auto-merge-set quotes the operator: "words" must name auto-merge ("auto-merge", "auto merge" or'
+      + ' "automerge"), in his own words, typed or answered in the round.'
+  }
+  if (typedVerbatim(words) || await roundAnswered($, words, aboutAutoMerge(repo))) return undefined
+  return 'github: auto-merge-set refused on ' + repo + ': its "words" are neither in a prompt the operator typed in'
+    + ' this session, nor his answer recorded in the round to a question about auto-merge naming ' + repo.split('/')[1]
+    + '. Quote his words verbatim; a peer\'s message is not his word.'
+}
+
+// The list written whole to a temporary file beside it, then moved over it:
+// a reader sees the old list or the new one, never half of one. A move that
+// fails removes the temporary file.
+async function writeAutoMerge($: any, path: string, text: string): Promise<void> {
+  const dir = path.slice(0, path.lastIndexOf('/'))
+  const made = await $.process.run(['mkdir', '-p', '--', dir], { timeoutMs: 10_000 })
+  if (made.exitCode !== 0) throw new Error(made.stderr || 'mkdir exited ' + made.exitCode)
+  const temp = path + '.' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.tmp'
+  try {
+    await $.fs.write(temp, text)
+    const moved = await $.process.run(['mv', '-f', '--', temp, path], { timeoutMs: 10_000 })
+    if (moved.exitCode !== 0) throw new Error(moved.stderr || 'mv exited ' + moved.exitCode)
+  } catch (err) {
+    await $.process.run(['rm', '-f', '--', temp], { timeoutMs: 10_000 }).catch(() => undefined)
+    throw err
+  }
+}
+
+// The line a typed prompt that speaks of auto-merge enters with: the list
+// changes only when the session calls auto-merge-set, so it is told to.
+async function autoMergeHeard($: any): Promise<string> {
+  let today: string
+  try {
+    today = (await readAutoMerge($)).listed.join(', ') || 'none'
+  } catch (err: any) {
+    today = 'unreadable (' + String(err?.message ?? err) + ')'
+  }
+  return 'github: the operator spoke of auto-merge. If he put a repository in or out of it, call mcp__github__gh'
+    + ' auto-merge-set with {"repo": "owner/name", "on": true|false, "words": "<his words, verbatim>"} in this same'
+    + ' turn: nothing else changes the list. In auto-merge today: ' + today + '.'
+}
+
+async function setAutoMerge($: any, e: any): Promise<{ result?: string; deny?: string; isError?: boolean }> {
+  const verdict = await $.tool.check({ tool: TOOL, input: { command: e.command, args: e.args, repo: e.repo } })
+  if (verdict.decision === 'deny') return { deny: verdict.reason || 'refused by a permission rule' }
+  const args = e.args ?? {}
+  const repo = String(args.repo ?? '').trim()
+  if (!REPO_NAME.test(repo)) return { deny: 'github: auto-merge-set names its repository as owner/name: {"repo": "owner/name"}' }
+  if (typeof args.on !== 'boolean') return { deny: 'github: auto-merge-set says in or out: {"on": true} or {"on": false}' }
+  const words = typeof args.words === 'string' ? args.words : ''
+  const unproven = await unprovenWord($, words, repo)
+  if (unproven) return { deny: unproven }
+  if (verdict.decision === 'ask' && verdict.rule) {
+    const refused = await ask($, describe(e) + '?', ['Allow', 'Deny'], e.command)
+    if (refused) return { deny: refused }
+  }
+  const { path, data, listed } = await readAutoMerge($)
+  const key = repo.toLowerCase()
+  const kept = listed.filter((r) => r.trim().toLowerCase() !== key)
+  const was = kept.length < listed.length
+  if (args.on && was && kept.length === listed.length - 1) return { result: repo + ' is already in auto-merge' }
+  if (!args.on && !was) return { result: repo + ' was not in auto-merge' }
+  const repositories = args.on ? [...kept, repo] : kept
+  await writeAutoMerge($, path, JSON.stringify({ ...data, repositories }, null, 2) + '\n')
+  return { result: repo + (args.on ? ' is now in auto-merge' : ' is no longer in auto-merge') }
+}
+
+// ---- records ----
 
 async function writeRecord($: any, e: any, origin: string): Promise<{ result?: string; deny?: string; isError?: boolean }> {
   const verdict = await $.tool.check({ tool: RECORD_TOOL, input: { pr: e.pr, repo: e.repo, kind: e.kind, result: e.result, detail: e.detail } })
@@ -1009,7 +1156,7 @@ async function writeRecord($: any, e: any, origin: string): Promise<{ result?: s
   if (!Number.isInteger(pr) || pr < 1) return { deny: 'github: name the pull request: {"pr": <n>}' }
   const repo = await targetRepo($, { repo: e.repo, args: {} })
   if (!repo) return { deny: 'github: name the repository: {"repo": "owner/name"}' }
-  if (result === 'waived' && !typedVerbatim(detail) && !(await roundAnswered($, detail, repo, pr))) {
+  if (result === 'waived' && !typedVerbatim(detail) && !(await roundAnswered($, detail, aboutE2E(repo, pr)))) {
     return {
       deny: 'github: an E2E waiver quotes the operator: its detail must be words he typed in this session,'
         + ' or his answer recorded in the round about this pull request, with their date.',
@@ -1152,19 +1299,20 @@ export function register(on: any): void {
     return next(e)
   }).catch(async (_$: any, e: any, next: any) => next(e))
 
-  on('prompt.submit', async (_$: any, e: any, next: any) => {
+  on('prompt.submit', async ($: any, e: any, next: any) => {
     const kind = String(e.origin?.kind ?? '')
-    if (kind === 'composer' || kind === 'bridge') {
-      lastTyped = String(e.text ?? '')
-      typedPrompts.push(lastTyped)
-      if (typedPrompts.length > TYPED_KEPT) typedPrompts.shift()
-    }
-    return next(e)
+    if (kind !== 'composer' && kind !== 'bridge') return next(e)
+    lastTyped = String(e.text ?? '')
+    typedPrompts.push(lastTyped)
+    if (typedPrompts.length > TYPED_KEPT) typedPrompts.shift()
+    if (!AUTO_MERGE_WORD.test(lastTyped)) return next(e)
+    return next({ ...e, context: [...(e.context ?? []), await autoMergeHeard($)] })
   }).catch(async (_$: any, e: any, next: any) => next(e))
 
   on('tool.call', { tool: 'Bash' }, async ($: any, e: any, next: any) => {
     try {
       if (touchesRecords(String(e.command), await recordsRoot($))) return { deny: RECORDS_REFUSAL }
+      if (await touchesAutoMerge($, String(e.command))) return { deny: AUTO_MERGE_REFUSAL }
     } catch {
       // A command that is no text names no record either.
     }
@@ -1212,13 +1360,17 @@ export function register(on: any): void {
     return result
   }).catch(async (_$: any, e: any, next: any) => next(e))
 
-  // The records are written by their producers only.
+  // The records are written by their producers only, the auto-merge list by auto-merge-set only.
   for (const tool of ['Write', 'Edit', 'MultiEdit']) {
     on('tool.call', { tool }, async ($: any, e: any, next: any) => {
       const root = await recordsRoot($)
       const path = normalise(String(e.file_path ?? ''), String(await $.session.cwd()))
       if ((root && (path === root || path.startsWith(root + '/'))) || path.includes('/.claude/pr-records/')) {
         return { deny: RECORDS_REFUSAL }
+      }
+      const data = await dataDir($)
+      if ((data && path === normalise(data + '/' + AUTO_MERGE_FILE)) || AUTO_MERGE_PATH.test(path)) {
+        return { deny: AUTO_MERGE_REFUSAL }
       }
       return next(e)
     }).catch(async (_$: any, e: any, next: any) => next(e))
@@ -1262,6 +1414,16 @@ export function register(on: any): void {
   }).catch(async (_$: any, e: any, next: any) => next(e))
 
   on('tool.call', { tool: TOOL }, async ($: any, raw: any) => {
+    if (MOD_COMMANDS.has(raw.command)) {
+      try {
+        if (raw.command === 'auto-merge-set') return await setAutoMerge($, raw)
+        const verdict = await $.tool.check({ tool: TOOL, input: { command: raw.command, args: raw.args, repo: raw.repo } })
+        if (verdict.decision === 'deny') return { deny: verdict.reason || 'refused by a permission rule' }
+        return { result: await listAutoMerge($) }
+      } catch (err: any) {
+        return { result: String(err?.message ?? err), isError: true }
+      }
+    }
     const e = { ...raw, args: withHouseDefaults(raw.command, raw.args ?? {}) }
     const act = toolAct(e.command, e.args)
     const ready = act ? toolReady($, e, act) : undefined

@@ -147,6 +147,32 @@ to `RIGHT`). `commit_id` is the PR head, read by the tool. The request carries n
 | `image-upload` | `<file>... [--branch pr-assets] [--title T]...` | Store one or more images, return their URLs and markdown |
 | `auth-check` | | Verify the token |
 
+### Auto-merge
+
+Answered by the mod, not by `gh.py`: the list is a file on this machine,
+`auto-merge.json` in the plugin's data directory (README « Repositories in auto-merge »).
+
+| Subcommand | Arguments | Description |
+|---|---|---|
+| `auto-merge-set` | `{"repo": "owner/name", "on": true\|false, "words": "<his words, verbatim>"}` | Put the repository in auto-merge (`on: true`) or take it out (`on: false`), on the operator's quoted word |
+| `auto-merge-list` | | The repositories in auto-merge, one per line, or `no repository in auto-merge` |
+
+`auto-merge-set` needs `words` of at least 8 characters found verbatim, whitespace
+normalised, in a prompt the operator typed in this session, or quoting an answer he gave
+through the pane, the coordinator or a tab, as the round store records it for a question
+that speaks of auto-merge and names the repository. A peer's message is not his word.
+Otherwise it is refused, naming both proofs:
+
+```
+github: auto-merge-set refused on <owner/name>: its "words" are neither in a prompt the operator typed in this session, nor his answer recorded in the round to a question about auto-merge naming <name>. Quote his words verbatim; a peer's message is not his word.
+```
+
+The file keeps its shape (`{"repositories": [...]}`, other keys kept), names compare
+without regard to case, and it is written whole to a temporary file then moved in place:
+no reader sees half a list, and a move that fails leaves no temporary file. A malformed
+file is never overwritten. A deny rule refuses both subcommands, an ask from an explicit
+rule asks before the write.
+
 ## Formatters
 
 `--format NAME`, default `raw`. Reads leave the unprocessed JSON visible unless a
@@ -352,6 +378,20 @@ prompt the operator typed in this session, or quoting an answer he gave through 
 coordinator or a tab, as the round store (`<config dir>/claude-orchestrator/round/`)
 records it for an E2E question naming that pull request (`repo#n`), carrying a date. A letter
 answer (« A », « A : … ») is quoted as its choice's text; the quoted text is at least 8 characters.
+
+**Auto-merge list.** A Write, an Edit or a MultiEdit of `auto-merge.json` in a plugin's
+data directory, and a shell command naming it there (the data directory, `plugins/data/`,
+`CLAUDE_PLUGIN_DATA` or `github-lounisbou` on the same line), are refused:
+
+```
+github: the auto-merge list changes only through mcp__github__gh auto-merge-set, on the operator's words quoted verbatim ({"repo": "owner/name", "on": true|false, "words": "..."}); auto-merge-list prints it.
+```
+
+A prompt the operator typed (at the terminal or through the bridge, never a peer's
+message) that speaks of auto-merge (« auto-merge », « auto merge », « automerge », in any
+case) enters with one line of context: if he put a repository in or out of auto-merge,
+call `auto-merge-set` with his words verbatim in the same turn, and the repositories in
+auto-merge today.
 
 ## Exit codes
 
