@@ -7,7 +7,7 @@ import { atom, read, update } from 'claude-code'
 import type { GithubPane, GithubPaneRow } from '../types'
 import { lint, refusal, textFields } from './writing.ts'
 import {
-  WRITING_FILE, bashAuthoring, lineCount, normalise, printsWhole, readerKey, readsWhole, toolAuthoring,
+  WRITING_FILE, bashAuthoring, bashTexts, lineCount, normalise, printsWhole, readerKey, readsWhole, toolAuthoring,
   unreadRefusal,
 } from './guards.ts'
 import {
@@ -150,6 +150,60 @@ async function permit(
     return 'gh ' + e.command + ' needs permission and nobody could be asked'
   }
   return 'the user refused gh ' + e.command
+}
+
+/*
+ * The writing rules on the Bash path: a gh pr create, edit, comment or review
+ * whose title or body (inline, or the file --body-file names) breaks them is
+ * refused once, as through the tool, and the same text again is put to the
+ * person. A body the hook cannot see, from stdin or a command substitution, is
+ * left out, and so is a file it cannot read, logged: the command then runs as it is.
+ */
+async function bashLint($: any, line: string): Promise<string | undefined> {
+  let texts
+  try {
+    texts = bashTexts(line)
+  } catch (err) {
+    return guardFailed($, err)
+  }
+  for (const text of texts) {
+    const args: Record<string, unknown> = {}
+    if (text.title !== undefined) args.title = text.title
+    if (text.body !== undefined) args.body = text.body
+    else if (text.bodyFile !== undefined) {
+      try {
+        args.body = String(await $.fs.read(await bodyPath($, text.bodyFile)))
+      } catch (err) {
+        // An unreadable file is gh's to refuse: the command runs unchecked.
+        $.ui.log('github: the writing rules could not read ' + text.bodyFile + ' and let the command through: '
+          + String((err as any)?.message ?? err))
+      }
+    }
+    const found = lint(text.command, args, lastTyped)
+    if (found.length === 0) continue
+    const command = text.name.slice('gh '.length)
+    const print = JSON.stringify(['Bash', text.argv, args])
+    if (!refusedOnce.has(print)) {
+      refusedOnce.add(print)
+      return refusal(command, found)
+    }
+    const rules = [...new Set(found.map((v) => v.rule.split(' (')[0]))].join(', ')
+    const refused = await ask($, 'Run ' + text.name + ' through Bash, which breaks the writing rules (' + rules
+      + '). Send it as it is?', ['Send as it is', 'Deny'], command)
+    if (refused) return refused
+  }
+  return undefined
+}
+
+// The file a --body-file names, as the shell reads it: `~` is HOME, a relative
+// path is under the session's directory.
+async function bodyPath($: any, file: string): Promise<string> {
+  const tilde = /^~(\/|$)/.exec(file)
+  if (!tilde && file.startsWith('~')) throw new Error('another user\'s home is not read: ' + file)
+  if (!tilde) return normalise(file, String(await $.session.cwd()))
+  const home = await $.env.get('HOME')
+  if (!home) throw new Error('HOME is unset, ' + file + ' is not read')
+  return normalise(String(home) + file.slice(1))
 }
 
 async function ask($: any, question: string, options: string[], command: string): Promise<string | undefined> {
@@ -1338,6 +1392,8 @@ export function register(on: any): void {
       const refused = await guardThrew($, current, err)
       if (refused) return { deny: refused }
     }
+    const unfit = await bashLint($, String(e.command))
+    if (unfit) return { deny: unfit }
     const result = await next(e)
     try {
       const printed = printsWhole(e.command)

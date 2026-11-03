@@ -58,6 +58,132 @@ export function bashAuthoring(line: string): string | undefined {
   return undefined
 }
 
+// The tool's subcommand whose writing rules a gh pr command's text keeps.
+const LINTED_AS: Record<string, string> = {
+  create: 'pr-create', edit: 'pr-update', comment: 'pr-comment', review: 'review-submit',
+}
+
+// A text a gh pr command of a Bash line writes: the command as the refusal
+// names it, the tool's subcommand whose rules apply, its argv, its title and
+// its body inline or the file that holds it.
+export type BashText = {
+  name: string
+  command: string
+  argv: string[]
+  title?: string
+  body?: string
+  bodyFile?: string
+}
+
+// The value the last of a flag's settings gives, as gh reads it: `--body x`,
+// `--body=x`, `-bx` or `-b x`.
+function flagValue(flags: string[], short: string, long: string): string | undefined {
+  let value: string | undefined
+  for (let k = 0; k < flags.length; k++) {
+    const word = flags[k]
+    if (word === short || word === long) value = flags[++k]
+    else if (word.startsWith(long + '=')) value = word.slice(long.length + 1)
+    else if (!word.startsWith('--') && word.startsWith(short) && word.length > 2) value = word.slice(2)
+  }
+  return value
+}
+
+// Whether the shell substitutes a command somewhere on the line: a $(…) or a
+// backtick outside single quotes, unescaped. An inline text there may not be
+// the one gh receives.
+export function substitutes(line: string): boolean {
+  let single = false
+  let double = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (single) {
+      if (c === "'") single = false
+      continue
+    }
+    if (c === '\\') i++
+    else if (c === "'" && !double) single = true
+    else if (c === '"') double = !double
+    else if (c === '`' || (c === '$' && line[i + 1] === '(')) return true
+  }
+  return false
+}
+
+// The body a `--body "$(cat <<'EOF' … EOF\n)"` substitution gives, when the
+// line holds exactly one.
+const HEREDOC_BODY = /(?:^|\s)(?:-b|--body)(?:\s+|=)"\$\(cat\s+<<-?\s*(['"]?)([A-Za-z_]\w*)\1[ \t]*\n([\s\S]*?)\n\2[ \t]*\n\s*\)"/g
+export function heredocBody(line: string): string | undefined {
+  const found = [...line.matchAll(HEREDOC_BODY)]
+  return found.length === 1 ? found[0][3] : undefined
+}
+
+// The mark put before each `$` or backtick the shell expands: a word that
+// holds it after the line is read is not the text gh receives.
+const EXPANDED = ''
+
+// The line with EXPANDED before every expansion the shell makes, outside single
+// quotes and unescaped: `$name`, `${…}`, `$1`, `$(…)`, a backtick, and `$'…'`
+// outside double quotes. It adds a plain character inside a word, so the line
+// splits into the same commands and words.
+function markExpansions(line: string): string {
+  let out = ''
+  let single = false
+  let ansi = false
+  let double = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    const next = line[i + 1] ?? ''
+    if (single || ansi) {
+      if (ansi && c === '\\') { out += c + next; i++; continue }
+      if (c === "'") { single = false; ansi = false }
+      out += c
+      continue
+    }
+    if (c === '\\') { out += c + next; i++; continue }
+    if (c === "'" && !double) single = true
+    else if (c === '"') double = !double
+    else if (c === '`' || (c === '$' && /[A-Za-z0-9_{(@*#?!$-]/.test(next))) out += EXPANDED
+    else if (c === '$' && next === "'" && !double) { out += EXPANDED; ansi = true; out += c + next; i++; continue }
+    out += c
+  }
+  return out
+}
+
+// The texts the gh pr commands of a Bash line write, each with the tool's
+// subcommand whose writing rules it keeps. A body read from stdin, one a
+// command substitution makes and no heredoc shows, a title, body or file a
+// shell variable or substitution gives, and a relative file after a cd are left
+// out.
+export function bashTexts(line: string): BashText[] {
+  const out: BashText[] = []
+  const substituted = substitutes(line)
+  const marked = simpleCommands(markExpansions(line))
+  const commands = simpleCommands(line)
+  // A cd moves the directory a relative path is read from: the hook knows only
+  // the session's.
+  const moves = commands.some((argv) => argv[0] === 'cd')
+  commands.forEach((argv, n) => {
+    const name = authoringCommand(argv)
+    const gh = name?.startsWith('gh pr ') ? ghWords(argv) : undefined
+    const command = gh ? LINTED_AS[gh.verb] : undefined
+    const words = marked[n] ? ghWords(marked[n]) : undefined
+    if (!gh || !command || !name || !words) return
+    const text: BashText = { name, command, argv }
+    const read = (value: string | undefined) => (value === undefined || value.includes(EXPANDED) ? undefined : value)
+    const title = flagValue(words.flags, '-t', '--title')
+    if (read(title) !== undefined && (command === 'pr-create' || command === 'pr-update')) text.title = title
+    const body = flagValue(words.flags, '-b', '--body')
+    const file = flagValue(words.flags, '-F', '--body-file')
+    if (body !== undefined) {
+      if (!substituted && read(body) !== undefined) text.body = body
+      else if (substituted && heredocBody(line) !== undefined) text.body = heredocBody(line)
+    } else if (read(file) !== undefined && file !== '-' && !(moves && !/^[/~]/.test(file ?? ''))) {
+      text.bodyFile = file
+    }
+    if (text.title !== undefined || text.body !== undefined || text.bodyFile !== undefined) out.push(text)
+  })
+  return out
+}
+
 // The tool's authoring call: a subcommand that carries text, with text in it.
 export function toolAuthoring(command: string, args: Record<string, unknown>): string | undefined {
   return textFields(command, args).length > 0 ? command : undefined

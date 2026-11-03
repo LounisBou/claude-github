@@ -3,7 +3,9 @@
 // judgement is here: a semicolon in prose, an attribution trailer, a title on
 // more than one line or far past « about sixty characters », a heading in a
 // pull request description, a TODO item that points to another or joins two
-// actions, a CVE id that is no link, a security update without its tables.
+// actions, a CVE id that is no link, a security update without its tables,
+// the four sections a description ends with, a pull request reference, a
+// negative phrase or a bold label in its summary, a horizontal rule.
 // The workflow vocabulary is left out: « session » and « agent » are also real
 // product words, and a refusal there would be a guess. Pure functions only:
 // register.ts holds the $ that acts on them.
@@ -92,7 +94,8 @@ const TITLE_LENGTH_RULE = 'a title is about sixty characters at most, this one h
 const HEADING_RULE = 'no heading of any kind in a pull request description, it starts with the summary text (WRITING.md, « Pull request descriptions »)'
 const TODO_RULE = 'a TODO Staging or TODO Prod item is a task-list checkbox, `- [ ] <step>`, never a bare `- ` bullet (WRITING.md, « Pull request descriptions »)'
 const TODO_LABEL = /^\*\*TODO (Staging|Prod):\*\*\s*$/
-const BOLD_LABEL = /^\*\*[^*]+:\*\*\s*$/
+// A bold label leading a line, `**Label:**`, alone or with text after it.
+const BOLD_LABEL = /^\*\*([^*]+):\*\*(.*)$/
 
 // A bare bullet under a TODO label: the section runs from its label to the next
 // bold label or blank-line-separated prose, and every list item in it must be
@@ -181,6 +184,95 @@ function missingCveTables(lines: string[]): boolean {
   return ids.some((id) => !named.has(id))
 }
 
+// The four sections every pull request description ends with, in this order.
+export const SECTIONS = ['TODO Staging', 'TODO Prod', 'PRs Dependency', 'Related PRs']
+
+// The phrasings that state what a pull request does not do, read in its
+// summary: WRITING.md, « State what the PR does, never what it does not do ».
+export const NEGATIVE_PHRASES = [
+  'unchanged', 'no dependency', 'does not', "doesn't", 'is not changed', 'left untouched',
+  'no other pull request', 'without conflict',
+]
+
+const DESCRIPTIONS = ' (WRITING.md, « Pull request descriptions »)'
+const MISSING_RULE = 'a pull request description ends with the four sections, missing here: '
+const ORDER_RULE = 'the four sections come in this order: ' + SECTIONS.join(', ') + ', each once' + DESCRIPTIONS
+const EMPTY_RULE = 'an empty section is written `**<Label>:** none` on the label\'s line, never a label with nothing after it' + DESCRIPTIONS
+const NONE_ITEMS_RULE = 'a section is either `none` on its label\'s line or its items below the label, never both' + DESCRIPTIONS
+const LABEL_TEXT_RULE = 'a section\'s label line holds the label alone, or the label and `none`, nothing else' + DESCRIPTIONS
+const OTHER_LABEL_RULE = 'no bold label line other than the four sections, '
+  + SECTIONS.map((s) => '`**' + s + ':**`').join(', ') + DESCRIPTIONS
+const REF_RULE = 'no pull request reference in the summary above the sections, `#N`, `repo#N`, `owner/repo#N` or a pull request URL:'
+  + ' it goes in PRs Dependency or Related PRs' + DESCRIPTIONS
+const RULE_LINE_RULE = 'no horizontal rule, `---`, `***` or `___`, in a pull request description' + DESCRIPTIONS
+const NEGATIVE_RULE = 'state what the PR does, never what it does not do' + DESCRIPTIONS
+
+const HORIZONTAL_RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
+const NEGATIVE = new RegExp('(?<![\\w-])(' + NEGATIVE_PHRASES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?![\\w-])', 'i')
+// A closing keyword links an issue, which GitHub reads only in the description.
+const CLOSING = /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+([\w.-]+(\/[\w.-]+)?)?#\d+\b/gi
+// A bare `#N` that is no 3- or 6-hex-digit colour, or a `repo#N` whose repository
+// has a name's shape: starting with a letter, its dots never before a digit, so
+// a version such as `v1.2#3` is none.
+const BARE_REF = new RegExp('(^|[^\\w&#/])#(?![0-9a-f]{3}\\b|[0-9a-f]{6}\\b)\\d+\\b'
+  + '|(?<![\\w.\\/-])([A-Za-z0-9][\\w.-]*\\/)?[A-Za-z][\\w-]*(\\.[A-Za-z][\\w-]*)*#\\d+\\b', 'i')
+// A link's target, `](…)`: an anchor such as `#2-deploy-it` is no reference.
+const LINK_TARGET = /\]\([^)]*\)/g
+const PR_URL = /\bhttps?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/i
+
+// A line with its images and HTML tags taken out: a screenshot is never prose.
+function withoutImages(line: string): string {
+  return line.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/<[a-z][^>]*>/gi, ' ')
+}
+
+// The section a line labels, its index in SECTIONS, and what follows the label
+// on that line; -1 for a bold label that is none of the four.
+function sectionLabel(line: string): { at: number; rest: string } | undefined {
+  const m = BOLD_LABEL.exec(line.trim())
+  return m ? { at: SECTIONS.indexOf(m[1].trim()), rest: m[2].trim() } : undefined
+}
+
+// What the four sections break: each present once, in order, each holding
+// `none` on its label's line or its items on the lines below, never both.
+function sectionFaults(lines: string[]): string[] {
+  const faults = new Set<string>()
+  const seen: number[] = []
+  lines.forEach((line, i) => {
+    const label = sectionLabel(line)
+    if (!label) return
+    if (label.at < 0) {
+      faults.add(OTHER_LABEL_RULE)
+      return
+    }
+    seen.push(label.at)
+    let items = 0
+    for (let j = i + 1; j < lines.length && lines[j].trim() !== '' && !sectionLabel(lines[j]); j++) items++
+    const none = label.rest === 'none'
+    if (label.rest !== '' && !none) faults.add(LABEL_TEXT_RULE)
+    else if (none && items > 0) faults.add(NONE_ITEMS_RULE)
+    else if (!none && items === 0) faults.add(EMPTY_RULE)
+  })
+  const missing = SECTIONS.filter((_, k) => !seen.includes(k))
+  if (missing.length > 0) faults.add(MISSING_RULE + missing.join(', ') + DESCRIPTIONS)
+  if (seen.some((k, n) => n > 0 && k <= seen[n - 1])) faults.add(ORDER_RULE)
+  return [...faults]
+}
+
+// The summary: the lines above the first of the four sections.
+function summaryLines(lines: string[]): string[] {
+  const first = lines.findIndex((l) => (sectionLabel(l)?.at ?? -1) >= 0)
+  return first < 0 ? lines : lines.slice(0, first)
+}
+
+function bareReference(line: string): boolean {
+  const text = withoutImages(line).replace(/(`+)[\s\S]*?\1/g, ' ').replace(CLOSING, ' ')
+  return PR_URL.test(text) || BARE_REF.test(strip(text.replace(LINK_TARGET, ']')))
+}
+
+function negative(line: string): boolean {
+  return NEGATIVE.test(strip(withoutImages(line)).replace(/\u2019/g, "'"))
+}
+
 // Every rule one field breaks, each named once.
 function lintField(kind: 'pr' | 'comment', field: string, text: string): Violation[] {
   const found: Violation[] = []
@@ -203,6 +295,11 @@ function lintField(kind: 'pr' | 'comment', field: string, text: string): Violati
     if (items.some((i) => JOINED.test(i))) add(TODO_ONE_RULE)
     if (bareCve(lines)) add(CVE_LINK_RULE)
     if (missingCveTables(lines)) add(CVE_TABLE_RULE)
+    sectionFaults(lines).forEach(add)
+    const summary = summaryLines(lines)
+    if (summary.some(bareReference)) add(REF_RULE)
+    if (lines.some((l) => HORIZONTAL_RULE.test(l))) add(RULE_LINE_RULE)
+    if (summary.some(negative)) add(NEGATIVE_RULE)
   }
   return found
 }

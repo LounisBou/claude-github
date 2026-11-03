@@ -662,7 +662,7 @@ test('a Bash pull request opened out of draft warns, then is refused under enfor
 
 test('a Bash draft opened gets Not Ready from the URL gh printed', async ($, on) => {
   const seen = await world($, on, { bashResult: { result: { stdout: 'https://github.com/acme/thing/pull/31\n', stderr: '', interrupted: false } } })
-  await $.tool.call(bash('gh pr create --draft -t "fix: x" -b body'))
+  await $.tool.call(bash('gh pr create --draft -t "fix: x" -b "Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"'))
   expect(seen.runs.map((r) => [r.command, r.repo, r.args])).toEqual([['pr-readiness', 'acme/thing', { pr: 31, state: 'not-ready' }]])
 })
 

@@ -73,23 +73,41 @@ Follow this exact template:
 - <url of the next one>
 ```
 
+The four sections are mandatory in every description, so an empty one reads as checked,
+never as forgotten. A section with nothing in it is written `none`, lowercase
+in one word, on its label's line.
+With nothing to do at deployment and no linked PR, a description ends with:
+
+```
+**TODO Staging:** none
+**TODO Prod:** none
+**PRs Dependency:** none
+**Related PRs:** none
+```
+
 No heading of any kind: the description starts directly with the summary text, never
 with `## Summary` or any other title. State what the PR does, never what it does not
 do — no list of omissions, no rejected alternatives, no things left untouched. Phrase
-a prerequisite positively ("X must have Y set", not "it will fail without Y").
+a prerequisite positively ("X must have Y set", not "it will fail without Y"). The
+plugin refuses, through its tool and through the shell alike, in the summary, the phrasings that say what the PR does not do:
+"unchanged", "no dependency", "does not", "doesn't", "is not changed", "left untouched",
+"no other pull request", "without conflict". The summary names no pull request: no
+`#N`, no `repo#N`, no `owner/repo#N`, no pull request URL above the sections, as links
+go in `PRs Dependency` or `Related PRs`, a closing keyword such as `Fixes #12` excepted. No horizontal rule (`---`, `***`, `___`) and no bold
+label line other than the four sections, anywhere in the description.
 The four sections come after the summary text, in that order, each in that exact shape
 whatever the number of items: the bold label alone on its line, then one item per line,
-nothing else on the line. A TODO Staging or TODO Prod item is a task-list checkbox, `- [ ] <step>`,
-never a bare `- ` bullet: the operator ticks it as the step is done. A TODO item stands alone:
+nothing else on the line, or the label and `none` on one line when the section is
+empty. A TODO Staging or TODO Prod item is a task-list checkbox, `- [ ] <step>`, never a bare `- ` bullet: the operator ticks it as the step is done. A TODO item stands alone:
 it never points to another item ("do the same edit", "same as above", "likewise") and writes
 the action in full, the file, the value before and after, and the host or environment. One
 checkbox, one action: an edit and the restart, reload, deploy or migration that applies it are
 two checkboxes, never joined by "then" or "and run". A PRs Dependency or Related PRs
 item is a `- ` bullet — the line break and the dash are what keep
 GitHub's preview rendering every link as a pull request card. Never a heading, never a
-link inline after the label. Every section is optional and present only when needed,
-never written empty or as `none`. A TODO section is mandatory whenever there is
-something to do at deployment. Staging and prod TODOs are always kept apart, even when
+link inline after the label: `none` is the one thing ever written beside a label, and
+never beside items. A label with nothing after it and no item below is an empty section
+left unsaid: write `none`. Staging and prod TODOs are always kept apart, even when
 they are the same items: then both sections list them. `**PRs Dependency:**` lists the
 PRs that must ship before this one or at the same time. When the order is not free, one
 PR strictly before the other (an API PR strictly before an infra PR, or the reverse),
@@ -112,12 +130,16 @@ The description of the operator's own draft PR is published and edited without a
 A colleague's PR and any review comment are proposed first.
 
 A paragraph stating the ship order is always added to a description, without asking:
-add, re-read, report in one line. Every (#N) written in a description comes from PR
-#N's own files and body, never by eye. A TODO goes only on the PR that enables its
+add, re-read, report in one line. It names no pull request, it points to the sections
+(« Ships after the PRs in PRs Dependency », « Ships in any order with the Related
+PRs »), and every (#N) goes in `PRs Dependency` or `Related PRs`. Every (#N) written in
+those sections comes from PR #N's own files and body, never by eye. A TODO goes only on the PR that enables its
 step: it runs when that PR ships.
 
 A pull request that changes an interface carries screenshots of what it changes,
-desktop AND mobile on a project with a mobile version. Every image is audited before
+desktop AND mobile on a project with a mobile version. They sit above the four
+sections: each image (`![…](…)` or an `<img>` tag) on its line, with a plain caption
+line under it (`Desktop`, `Mobile`), never a bold label. Every image is audited before
 the PR is Ready, and a PR without both is not ready. When a visual is fixed after the
 merge, retake the screenshots and replace them on GitHub and Notion.
 
@@ -149,8 +171,8 @@ a record at the head they read (see REFERENCE.md « Records »). CI is read from
 
 A pull request that updates dependencies to fix published advisories opens its
 description with the first line and the tables below. They take the place of the
-summary text, and the four sections of the template above follow when needed, with
-their rules. A description whose first line names a CVE id is read as a security
+summary text, and the four sections of the template above follow, with their rules,
+`none` where empty. A description whose first line names a CVE id is read as a security
 update and needs its tables:
 
 ```
