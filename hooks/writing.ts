@@ -211,7 +211,13 @@ const HORIZONTAL_RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
 const NEGATIVE = new RegExp('(^|[^\\w])(' + NEGATIVE_PHRASES.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?![\\w])', 'i')
 // A closing keyword links an issue, which GitHub reads only in the description.
 const CLOSING = /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+([\w.-]+(\/[\w.-]+)?)?#\d+\b/gi
-const BARE_REF = /(^|[^\w&#/])#\d+\b|\b[\w.-]+(\/[\w.-]+)?#\d+\b/
+// A bare `#N` that is no 3- or 6-hex-digit colour, or a `repo#N` whose repository
+// has a name's shape: starting with a letter, its dots never before a digit, so
+// a version such as `v1.2#3` is none.
+const BARE_REF = new RegExp('(^|[^\\w&#/])#(?![0-9a-f]{3}\\b|[0-9a-f]{6}\\b)\\d+\\b'
+  + '|(?<![\\w.\\/-])([A-Za-z0-9][\\w.-]*\\/)?[A-Za-z][\\w-]*(\\.[A-Za-z][\\w-]*)*#\\d+\\b', 'i')
+// A link's target, `](…)`: an anchor such as `#2-deploy-it` is no reference.
+const LINK_TARGET = /\]\([^)]*\)/g
 const PR_URL = /\bhttps?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/i
 
 // A line with its images and HTML tags taken out: a screenshot is never prose.
@@ -260,7 +266,7 @@ function summaryLines(lines: string[]): string[] {
 
 function bareReference(line: string): boolean {
   const text = withoutImages(line).replace(/(`+)[\s\S]*?\1/g, ' ').replace(CLOSING, ' ')
-  return PR_URL.test(text) || BARE_REF.test(strip(text))
+  return PR_URL.test(text) || BARE_REF.test(strip(text.replace(LINK_TARGET, ']')))
 }
 
 function negative(line: string): boolean {

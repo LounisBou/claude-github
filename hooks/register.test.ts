@@ -755,6 +755,27 @@ test('a bare pull request reference in the summary is refused, the same in a sec
   expect(lint('pr-create', { title: 't', body: 'Fixes #12, closes front#13 and resolves acme/front#14.\n\nUses `#15` and `front#16` and &#59;.\n\n' + NONE })).toEqual([])
 })
 
+test('a colour, a link to an anchor and a version before a #N are no pull request reference', () => {
+  const rule = 'body: no pull request reference in the summary above the sections, `#N`, `repo#N`, `owner/repo#N` or a pull request URL: it goes in PRs Dependency or Related PRs'
+  for (const summary of [
+    'Sets the border to #333 and the text to #112233.',
+    'Follows [the deploy steps](#2-deploy-it).',
+    'Bumps the parser past v1.2#3.',
+    'Reads the 2.0#1 marker.',
+  ]) {
+    expect(lint('pr-create', { title: 't', body: summary + '\n\n' + NONE }), summary).toEqual([])
+  }
+  for (const summary of [
+    'Ships after #12.',
+    'Ships after #1234.',
+    'Ships after geo-git-flow#21.',
+    'Ships after claude.github#21.',
+    'Ships after LounisBou/claude-code#15.',
+  ]) {
+    expect(rulesOf('pr-create', { title: 't', body: summary + '\n\n' + NONE }), summary).toEqual([rule])
+  }
+})
+
 test('a horizontal rule is refused, a table and a rule in code are not', () => {
   const rule = 'body: no horizontal rule, `---`, `***` or `___`, in a pull request description'
   for (const line of ['---', '***', '___', ' - - -']) {
