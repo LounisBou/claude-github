@@ -2085,3 +2085,121 @@ test('a Read of another checkout\'s engine/WRITING.md does not mark', async ($, 
   const out: any = await $.tool.call({ tool: 'Bash', command: 'git commit -m x' })
   expect(JSON.stringify(out)).toContain('before git commit:')
 })
+
+// ---- the writing rules on the Bash path ----
+
+// A session that has read WRITING.md, whose Bash runs nothing and whose files
+// are the ones given, by absolute path. bash: the command lines that ran.
+async function stubBashLint($: any, on: any, bash: string[], asked: string[], answer: string, files: Record<string, string> = {}) {
+  stubAsk(on, asked, answer)
+  on('fs.read', (_$: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT ' + e.path }))
+  await stubGuard($, on, [], bash)
+  await $.tool.call({ tool: 'Read', file_path: writingFile() })
+}
+
+test('a gh pr create whose body file breaks a rule is refused once, then sendable as it is', async ($, on) => {
+  const bash: string[] = []
+  const asked: string[] = []
+  await stubBashLint($, on, bash, asked, 'Send as it is', { '/work/body.md': 'Adds the reset; at last.\n\n' + NONE })
+
+  const command = 'gh pr create --title "feat: add the reset" --body-file body.md'
+  const out: any = await $.tool.call({ tool: 'Bash', command })
+  expect(out.deny).toContain('gh pr create refused, its text breaks the writing rules:\n- body: no semicolon in prose')
+  expect(asked).toEqual([])
+  expect(bash).toEqual([])
+  const again: any = await $.tool.call({ tool: 'Bash', command })
+  expect(again.deny).toBeUndefined()
+  expect(asked.length).toBe(1)
+  expect(asked[0]).toContain('no semicolon in prose')
+  expect(asked[0]).toContain('Send it as it is?')
+  expect(bash).toEqual([command])
+})
+
+test('a gh pr edit whose -b body lacks the sections is refused once, then sendable as it is', async ($, on) => {
+  const bash: string[] = []
+  const asked: string[] = []
+  await stubBashLint($, on, bash, asked, 'Send as it is')
+
+  const command = 'gh pr edit 3 -R acme/front -b \'Adds the reset.\''
+  const out: any = await $.tool.call({ tool: 'Bash', command })
+  expect(out.deny).toContain('gh pr edit refused')
+  expect(out.deny).toContain('- body: a pull request description ends with the four sections, missing here: TODO Staging')
+  expect(bash).toEqual([])
+  const again: any = await $.tool.call({ tool: 'Bash', command })
+  expect(again.deny).toBeUndefined()
+  expect(asked.length).toBe(1)
+  expect(bash).toEqual([command])
+})
+
+test('a refused Bash text the person denies runs nothing', async ($, on) => {
+  const bash: string[] = []
+  const asked: string[] = []
+  await stubBashLint($, on, bash, asked, 'Deny')
+
+  const command = 'gh pr comment 3 --body "Done; thanks"'
+  await $.tool.call({ tool: 'Bash', command })
+  const again: any = await $.tool.call({ tool: 'Bash', command })
+  expect(again.deny).toContain('the user refused gh pr comment')
+  expect(asked.length).toBe(1)
+  expect(bash).toEqual([])
+})
+
+test('a Bash title and body that keep the rules run with no question', async ($, on) => {
+  const bash: string[] = []
+  const asked: string[] = []
+  await stubBashLint($, on, bash, asked, 'Deny', { '/tmp/b.md': 'Adds the reset.\n\n' + NONE })
+
+  const lines = [
+    'gh pr create -t "feat: add the reset" -F /tmp/b.md --draft',
+    'gh pr edit 3 --title=\'fix: keep the reset\'',
+    'gh pr edit 3 --body "Adds the reset.\n\n' + NONE + '"',
+    'gh pr comment 3 -b "Thanks, fixed."',
+    'gh pr edit 3 --add-label Ready',
+  ]
+  for (const command of lines) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(asked).toEqual([])
+  expect(bash).toEqual(lines)
+})
+
+test('a Bash title past the margin and a semicolon in a review body are refused', async ($, on) => {
+  const bash: string[] = []
+  await stubBashLint($, on, bash, [], 'Deny')
+
+  const title: any = await $.tool.call({ tool: 'Bash', command: 'gh pr edit 3 --title "feat: ' + 'x'.repeat(80) + '"' })
+  expect(title.deny).toContain('- title: a title is about sixty characters at most')
+  const review: any = await $.tool.call({ tool: 'Bash', command: 'gh pr review 3 --comment -b "Looks right; merge it"' })
+  expect(review.deny).toContain('gh pr review refused')
+  expect(bash).toEqual([])
+})
+
+test('a body Bash cannot show, from stdin or a command substitution, is left to the person', async ($, on) => {
+  const bash: string[] = []
+  await stubBashLint($, on, bash, [], 'Deny')
+
+  const lines = [
+    'gh pr create --title "feat: x" --body-file - < /tmp/b.md',
+    'gh pr create --title "feat: x" --body "$(cat /tmp/b.md)"',
+    'gh pr edit 3 --body-file /missing.md',
+  ]
+  for (const command of lines) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(bash).toEqual(lines)
+})
+
+test('a body in a heredoc substitution is read and linted', async ($, on) => {
+  const bash: string[] = []
+  await stubBashLint($, on, bash, [], 'Deny')
+
+  const bad = 'gh pr create --title "feat: x" --body "$(cat <<\'EOF\'\nAdds the reset; at last.\n\n' + NONE + '\nEOF\n)"'
+  const out: any = await $.tool.call({ tool: 'Bash', command: bad })
+  expect(out.deny).toContain('- body: no semicolon in prose')
+  const good = bad.replace('; at last', '')
+  const ok: any = await $.tool.call({ tool: 'Bash', command: good })
+  expect(ok.deny).toBeUndefined()
+  expect(bash).toEqual([good])
+})

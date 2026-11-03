@@ -58,6 +58,91 @@ export function bashAuthoring(line: string): string | undefined {
   return undefined
 }
 
+// The tool's subcommand whose writing rules a gh pr command's text keeps.
+const LINTED_AS: Record<string, string> = {
+  create: 'pr-create', edit: 'pr-update', comment: 'pr-comment', review: 'review-submit',
+}
+
+// A text a gh pr command of a Bash line writes: the command as the refusal
+// names it, the tool's subcommand whose rules apply, its argv, its title and
+// its body inline or the file that holds it.
+export type BashText = {
+  name: string
+  command: string
+  argv: string[]
+  title?: string
+  body?: string
+  bodyFile?: string
+}
+
+// The value the last of a flag's settings gives, as gh reads it: `--body x`,
+// `--body=x`, `-bx` or `-b x`.
+function flagValue(flags: string[], short: string, long: string): string | undefined {
+  let value: string | undefined
+  for (let k = 0; k < flags.length; k++) {
+    const word = flags[k]
+    if (word === short || word === long) value = flags[++k]
+    else if (word.startsWith(long + '=')) value = word.slice(long.length + 1)
+    else if (!word.startsWith('--') && word.startsWith(short) && word.length > 2) value = word.slice(2)
+  }
+  return value
+}
+
+// Whether the shell substitutes a command somewhere on the line: a $(…) or a
+// backtick outside single quotes, unescaped. An inline text there may not be
+// the one gh receives.
+export function substitutes(line: string): boolean {
+  let single = false
+  let double = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (single) {
+      if (c === "'") single = false
+      continue
+    }
+    if (c === '\\') i++
+    else if (c === "'" && !double) single = true
+    else if (c === '"') double = !double
+    else if (c === '`' || (c === '$' && line[i + 1] === '(')) return true
+  }
+  return false
+}
+
+// The body a `--body "$(cat <<'EOF' … EOF\n)"` substitution gives, when the
+// line holds exactly one.
+const HEREDOC_BODY = /(?:^|\s)(?:-b|--body)(?:\s+|=)"\$\(cat\s+<<-?\s*(['"]?)([A-Za-z_]\w*)\1[ \t]*\n([\s\S]*?)\n\2[ \t]*\n\s*\)"/g
+export function heredocBody(line: string): string | undefined {
+  const found = [...line.matchAll(HEREDOC_BODY)]
+  return found.length === 1 ? found[0][3] : undefined
+}
+
+// The texts the gh pr commands of a Bash line write, each with the tool's
+// subcommand whose writing rules it keeps. A body read from stdin, or one a
+// command substitution makes and no heredoc shows, is left out.
+export function bashTexts(line: string): BashText[] {
+  const out: BashText[] = []
+  const substituted = substitutes(line)
+  for (const argv of simpleCommands(line)) {
+    const name = authoringCommand(argv)
+    const gh = name?.startsWith('gh pr ') ? ghWords(argv) : undefined
+    const command = gh ? LINTED_AS[gh.verb] : undefined
+    if (!gh || !command || !name) continue
+    const text: BashText = { name, command, argv }
+    const title = flagValue(gh.flags, '-t', '--title')
+    if (title !== undefined && (command === 'pr-create' || command === 'pr-update')) text.title = title
+    const body = flagValue(gh.flags, '-b', '--body')
+    const file = flagValue(gh.flags, '-F', '--body-file')
+    if (body !== undefined) {
+      if (!substituted) text.body = body
+      else if (heredocBody(line) !== undefined) text.body = heredocBody(line)
+    } else if (file !== undefined && file !== '-') {
+      text.bodyFile = file
+    }
+    if (text.title !== undefined || text.body !== undefined || text.bodyFile !== undefined) out.push(text)
+  }
+  return out
+}
+
 // The tool's authoring call: a subcommand that carries text, with text in it.
 export function toolAuthoring(command: string, args: Record<string, unknown>): string | undefined {
   return textFields(command, args).length > 0 ? command : undefined
