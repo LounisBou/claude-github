@@ -820,6 +820,52 @@ test('screenshots with a plain caption are part of a description', () => {
   expect(lint('pr-create', { title: 't', body: body.replace(', the page unchanged at 320 px', '') })).toEqual([])
 })
 
+// Two screenshots in the format WRITING.md gives: each a bold title alone on
+// its line, its image on the next, a `---` with a blank line before it between them.
+const DESKTOP_SHOT = '**Devices list, desktop 1440 px, after**\n![Devices list, desktop 1440 px, after](https://github.com/user-attachments/assets/1.png)'
+const MOBILE_SHOT = '**Devices list, mobile 390 px, after**\n![Devices list, mobile 390 px, after](https://github.com/user-attachments/assets/2.png)'
+const RULE_LINE = 'body: no horizontal rule, `---`, `***` or `___`, in a pull request description'
+
+test('a `---` between two titled screenshots, a blank line before it, is part of a description', () => {
+  const body = 'Adds the last alert column.\n\n' + DESKTOP_SHOT + '\n\n---\n\n' + MOBILE_SHOT + '\n\n---\n\n' + DESKTOP_SHOT + '\n\n' + NONE
+  expect(lint('pr-create', { title: 't', body })).toEqual([])
+})
+
+test('a `---` between two titled screenshots drawn with <img> tags is part of a description', () => {
+  const body = 'Adds the last alert column.\n\n**Devices list, desktop 1440 px, after**\n<img src="https://github.com/user-attachments/assets/1.png" width="720">\n\n---\n\n'
+    + '**Devices list, mobile 390 px, after**\n<img src="https://github.com/user-attachments/assets/2.png" width="320">\n\n' + NONE
+  expect(lint('pr-create', { title: 't', body })).toEqual([])
+})
+
+test('the block image-upload writes for two titled files is part of a description', () => {
+  const block = '**First**\n![First](https://github.com/acme/thing/blob/pr-assets/a.png?raw=true)\n\n---\n\n'
+    + '**Second**\n![Second](https://github.com/acme/thing/blob/pr-assets/b.png?raw=true)'
+  expect(lint('pr-create', { title: 't', body: 'Adds the reset button.\n\n' + block + '\n\n' + NONE })).toEqual([])
+})
+
+test('a rule anywhere but between two titled screenshots is refused, and the refusal names the exception', () => {
+  const summary = 'Adds the last alert column.\n\n'
+  for (const [name, body] of [
+    ['under the summary, above the first screenshot', summary + '---\n\n' + DESKTOP_SHOT + '\n\n---\n\n' + MOBILE_SHOT + '\n\n' + NONE],
+    ['after the last screenshot, above the sections', summary + DESKTOP_SHOT + '\n\n---\n\n' + MOBILE_SHOT + '\n\n---\n\n' + NONE],
+    ['right under an image, which makes it a heading', summary + DESKTOP_SHOT + '\n---\n\n' + MOBILE_SHOT + '\n\n' + NONE],
+    ['between two images with no title', summary + '![d](https://example.com/d.png)\n\n---\n\n![m](https://example.com/m.png)\n\n' + NONE],
+    ['between a titled image and prose', summary + DESKTOP_SHOT + '\n\n---\n\nThe column sorts by date.\n\n' + NONE],
+    ['`***` between two screenshots', summary + DESKTOP_SHOT + '\n\n***\n\n' + MOBILE_SHOT + '\n\n' + NONE],
+    ['`___` between two screenshots', summary + DESKTOP_SHOT + '\n\n___\n\n' + MOBILE_SHOT + '\n\n' + NONE],
+    ['between two screenshots in a section', summary + NONE.replace('**Related PRs:** none', '**Related PRs:**\n- https://github.com/acme/front/pull/1620') + '\n\n' + DESKTOP_SHOT + '\n\n---\n\n' + MOBILE_SHOT],
+  ]) {
+    expect(rulesOf('pr-create', { title: 't', body }), name).toContain(RULE_LINE)
+  }
+  const refused = lint('pr-create', { title: 't', body: summary + '---\n\n' + NONE })
+  expect(refused.map((v) => v.rule).join('\n')).toContain('a `---` is kept only between two screenshots, a blank line before it')
+})
+
+test('a screenshot\'s bold title is read as the summary', () => {
+  const body = 'Adds the last alert column.\n\n**Settings page unchanged, after**\n![settings](https://github.com/user-attachments/assets/1.png)\n\n' + NONE
+  expect(rulesOf('pr-create', { title: 't', body })).toEqual(['body: state what the PR does, never what it does not do'])
+})
+
 test('an image\'s alt text, URL and HTML attributes are never read as the summary', () => {
   for (const image of [
     '![the page unchanged](https://github.com/user-attachments/assets/1.png)',
