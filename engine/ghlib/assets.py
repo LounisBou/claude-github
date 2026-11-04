@@ -11,7 +11,7 @@ import os
 
 from . import errors, http, repo
 
-MAX_TITLE_LENGTH = 60
+MAX_TITLE_LENGTH = 100
 BLOCK_SEPARATOR = "\n\n---\n\n"
 
 
@@ -20,10 +20,14 @@ def _clean_title(title):
         return None
     stripped = title.strip()
     if not stripped or "\n" in stripped:
-        raise errors.UsageError("image title must be a short, single-line label")
+        raise errors.UsageError("image title must be one line")
     if len(stripped) > MAX_TITLE_LENGTH:
         raise errors.UsageError(
             "image title is longer than %d characters: shorten it" % MAX_TITLE_LENGTH
+        )
+    if stripped.endswith(":"):
+        raise errors.UsageError(
+            "image title must not end with a colon, which would read as a section label"
         )
     return stripped
 
@@ -126,7 +130,7 @@ def register(subparsers):
     parser.add_argument(
         "--title",
         action="append",
-        help="short label (max %d characters) shown above its image; repeat once per file"
+        help="the screenshot's title (max %d characters), in bold above its image; repeat once per file"
         % MAX_TITLE_LENGTH,
     )
     parser.set_defaults(handler=image_upload)

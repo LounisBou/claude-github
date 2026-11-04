@@ -649,8 +649,11 @@ check "without --title the markdown stays bare" \
 check "without --title the JSON carries no title key" "False" \
   "$(printf '%s' "$untitled" | python3 -c 'import json,sys; print("title" in json.load(sys.stdin))')"
 
-check_status "a title over 60 characters exits 1" 1 \
-  gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..61})"
+check_status "a title over 100 characters exits 1" 1 \
+  gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..101})"
+check "a descriptive title of 66 characters is kept" "Export dialog, open with a month of invoices, mobile 390 px, after" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "Export dialog, open with a month of invoices, mobile 390 px, after" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title"))')"
+check_status "a title ending with a colon exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "Login screen:"
 check_status "an empty title after trim exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "   "
 
 printf 'another capture' > "$WORK/second.png"
