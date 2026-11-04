@@ -888,7 +888,11 @@ async function bashReady($: any, act: Act, after: Array<(result: any) => Promise
   const readyPhase = await phaseOf($)
   if (act.kind === 'create') {
     if (readyPhase === 'enforce') return draftRefusal(act.name)
-    await warnAct($, act, 'bash', act.repo ?? '?', '?', '', ['opened out of draft'])
+    // Opening out of draft is leaving draft: outside auto-merge it needs the
+    // operator's word, which the tool asks for, as gh pr ready does.
+    if (!act.repo) return unnamedRepoRefusal(act.name)
+    if (!(await autoMergeRepos($)).has(act.repo.toLowerCase())) return autoMergeRefusal('create', act.repo, undefined, engineName(act))
+    await warnAct($, act, 'bash', act.repo, '?', '', ['opened out of draft'])
     return undefined
   }
   if (act.kind === 'create-draft') {

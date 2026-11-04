@@ -2254,7 +2254,7 @@ test('a gh pr create whose body file breaks a rule is refused once, then sendabl
   const asked: string[] = []
   await stubBashLint($, on, bash, asked, 'Send as it is', { '/work/body.md': 'Adds the reset; at last.\n\n' + NONE })
 
-  const command = 'gh pr create --title "feat: add the reset" --body-file body.md'
+  const command = 'gh pr create --draft --title "feat: add the reset" --body-file body.md'
   const out: any = await $.tool.call({ tool: 'Bash', command })
   expect(out.deny).toContain('gh pr create refused, its text breaks the writing rules:\n- body: no semicolon in prose')
   expect(asked).toEqual([])
@@ -2352,8 +2352,8 @@ test('a body Bash cannot show, from stdin or a command substitution, is left to 
   await stubBashLint($, on, bash, [], 'Deny')
 
   const lines = [
-    'gh pr create --title "feat: x" --body-file - < /tmp/b.md',
-    'gh pr create --title "feat: x" --body "$(cat /tmp/b.md)"',
+    'gh pr create --draft --title "feat: x" --body-file - < /tmp/b.md',
+    'gh pr create --draft --title "feat: x" --body "$(cat /tmp/b.md)"',
     'gh pr edit 3 --body-file /missing.md',
   ]
   for (const command of lines) {
@@ -2368,7 +2368,7 @@ test('a title or body a shell variable or substitution gives is left to the pers
   await stubBashLint($, on, bash, [], 'Deny')
 
   const lines = [
-    'gh pr create --title "$TITLE" --body "$BODY"',
+    'gh pr create --draft --title "$TITLE" --body "$BODY"',
     'gh pr edit 3 --body "${BODY}"',
     'gh pr edit 3 -b $BODY',
     'gh pr comment 3 --body $\'Done; thanks\'',
@@ -2392,11 +2392,11 @@ test('a body file under ~ is read from HOME, a relative one after a cd is left t
   on('env.get', (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
   await stubBashLint($, on, bash, [], 'Deny', { '/home/me/b.md': bad, '/work/b.md': bad, '/tmp/b.md': bad })
 
-  const home: any = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "feat: x" --body-file ~/b.md' })
+  const home: any = await $.tool.call({ tool: 'Bash', command: 'gh pr create --draft --title "feat: x" --body-file ~/b.md' })
   expect(home.deny).toContain('- body: no semicolon in prose')
-  const absolute: any = await $.tool.call({ tool: 'Bash', command: 'cd sub && gh pr create --title "feat: x" -F /tmp/b.md' })
+  const absolute: any = await $.tool.call({ tool: 'Bash', command: 'cd sub && gh pr create --draft --title "feat: x" -F /tmp/b.md' })
   expect(absolute.deny).toContain('- body: no semicolon in prose')
-  const moved = 'cd sub && gh pr create --title "feat: x" --body-file b.md'
+  const moved = 'cd sub && gh pr create --draft --title "feat: x" --body-file b.md'
   const out: any = await $.tool.call({ tool: 'Bash', command: moved })
   expect(out.deny).toBeUndefined()
   expect(bash).toEqual([moved])
@@ -2423,7 +2423,7 @@ test('a body in a heredoc substitution is read and linted', async ($, on) => {
   const bash: string[] = []
   await stubBashLint($, on, bash, [], 'Deny')
 
-  const bad = 'gh pr create --title "feat: x" --body "$(cat <<\'EOF\'\nAdds the reset; at last.\n\n' + NONE + '\nEOF\n)"'
+  const bad = 'gh pr create --draft --title "feat: x" --body "$(cat <<\'EOF\'\nAdds the reset; at last.\n\n' + NONE + '\nEOF\n)"'
   const out: any = await $.tool.call({ tool: 'Bash', command: bad })
   expect(out.deny).toContain('- body: no semicolon in prose')
   const good = bad.replace('; at last', '')
