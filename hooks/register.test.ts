@@ -609,10 +609,23 @@ test('a TODO item that points to another or joins two actions is refused, two fu
   expect(lint('pr-create', { title: 't', body: 'Reads the file, then caches it, the same as before.\n\n**TODO Staging:** none\n**TODO Prod:**\n- [ ] Set `mode=then` in `app.env` on prod-01\n\n**PRs Dependency:** none\n**Related PRs:** none' })).toEqual([])
 })
 
-test('an attribution trailer is refused, Signed-off-by is not', () => {
+test('every trailer is refused, Signed-off-by included', () => {
   expect(rulesOf('pr-create', { title: 't', body: 'Text\n\nCo-Authored-By: someone <a@b.c>' })[0]).toContain('no trailer')
   expect(rulesOf('thread-reply', { thread_id: 'x', body: 'ok\nclaude-session: 123' })[0]).toContain('no trailer')
-  expect(lint('pr-create', { title: 't', body: 'Text\n\n' + NONE + '\n\nSigned-off-by: Dev <d@e.f>' })).toEqual([])
+  expect(rulesOf('pr-create', { title: 't', body: 'Text\n\n' + NONE + '\n\nSigned-off-by: Dev <d@e.f>' })).toContain('body: no trailer of any kind, such as Co-Authored-By, Signed-off-by or Claude-Session')
+  for (const trailer of ['Reviewed-by: Dev <d@e.f>', 'Acked-by: Dev <d@e.f>', 'Change-Id: I0123456789abcdef']) {
+    expect(rulesOf('pr-comment', { pr: 1, body: 'Looks right.\n\n' + trailer }), trailer).toEqual(['body: no trailer of any kind, such as Co-Authored-By, Signed-off-by or Claude-Session'])
+  }
+  expect(lint('pr-comment', { pr: 1, body: 'Note: the cache is cold.\nFollow-up work: the index.' })).toEqual([])
+})
+
+test('a description ends with the four sections, any text after them is refused', () => {
+  const rule = 'body: nothing after the four sections, a description ends with Related PRs'
+  expect(rulesOf('pr-create', { title: 't', body: 'Adds the reset.\n\n' + NONE + '\n\nThanks for the review.' })).toEqual([rule])
+  const listed = 'Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:**\n- https://github.com/acme/front/pull/1620\n\nThanks.'
+  expect(rulesOf('pr-create', { title: 't', body: listed })).toEqual([rule])
+  expect(lint('pr-create', { title: 't', body: listed.replace('\n\nThanks.', '\n\n') })).toEqual([])
+  expect(rulesOf('pr-create', { title: 't', body: 'Adds the reset.\n\n' + NONE + '\n\n```\nnpm test\n```' })).toEqual([rule])
 })
 
 test('a title past the margin or on two lines is refused, one of about sixty passes', () => {
