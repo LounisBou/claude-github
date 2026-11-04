@@ -1314,8 +1314,8 @@ export function register(on: any): void {
         description:
           'Record the end-to-end tests of a pull request at its head commit: pass, fail, or waived by '
           + 'the operator in his own words. Run from a clean checkout at the pull request\'s head, after '
-          + 'the tests ran there. A waiver\'s detail quotes words he typed in this session, with their date '
-          + '(YYYY-MM-DD). Reviews and norms checks are recorded by their own tools. See '
+          + 'the tests ran there. A waiver\'s detail quotes words he typed in this session, or his answer '
+          + 'recorded in the round for that pull request, with their date (YYYY-MM-DD). Reviews and norms checks are recorded by their own tools. See '
           + root + '/engine/REFERENCE.md « Records ».',
         inputSchema: {
           type: 'object',
