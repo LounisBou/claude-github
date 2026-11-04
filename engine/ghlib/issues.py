@@ -1,4 +1,4 @@
-"""Issues and cross-repository search."""
+"""Issues and search within the repository."""
 
 from urllib.parse import quote
 

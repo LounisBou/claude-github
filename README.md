@@ -66,14 +66,13 @@ it. `/github:doctor` then confirms everything is ready.
   put to the user. `pr-create` opens a draft unless the call says otherwise,
   and leaving draft (`draft: false`, `pr-ready`) and a merge (`pr-merge`) are
   always asked, whatever the rules allow, except in a repository in auto-merge
-  (below). An existing
+  (below) and for a CI undraft (« Ready pull requests »). An existing
   description is replaced without asking, under the writing rules.
 - **Ready and Not Ready labels** — `pr-readiness <pr> ready|not-ready` puts
   the `Ready` (`27e760`) or `Not Ready` (`8c1455`) label on a pull request and
   takes the other off, and `labels-ensure` creates both on a repository that
   lacks them. `pr-create` labels the new pull request (`Not Ready` for a draft,
-  `Ready` otherwise) and `pr-ready` puts `Ready` on it, so the label says what
-  the draft flag says. A label failure never fails the command it follows.
+  `Ready` otherwise) and `pr-ready` puts `Ready` on it. A label failure never fails the command it follows.
 - **Auto-merge list** — `auto-merge-set` puts a repository in auto-merge or
   takes it out, on the operator's words quoted verbatim, and `auto-merge-list`
   prints the list (below).
@@ -125,8 +124,9 @@ says so in one transcript line.
 
 The list changes only through the tool, on the operator's word:
 `auto-merge-set {"repo": "owner/name", "on": true|false, "words": "<his words>"}`
-adds or removes a repository when `words` is found verbatim in a prompt he typed
-or in his answer recorded in the round, and `auto-merge-list` prints it. A Write,
+adds or removes a repository when `words` names auto-merge (« auto-merge », « auto
+merge » or « automerge ») and is found verbatim in a prompt he typed or in his answer
+recorded in the round, and `auto-merge-list` prints it. A Write,
 an Edit or a shell command on the file is refused. A prompt he types that speaks
 of auto-merge reminds the session to call `auto-merge-set`.
 
@@ -135,7 +135,7 @@ of auto-merge reminds the session to call `auto-merge-set`.
 A pull request is ready when four things hold at its current head commit: a
 clean review, a passed norms check, passed end-to-end tests (or a waiver the
 operator dated in his own words) and green CI. The `Ready` label, leaving
-draft and a merge need the four; a draft carries `Not Ready`, and a push to
+draft and a merge need the four; a draft opens with `Not Ready`, and a push to
 the branch puts `Not Ready` back. CI is read from GitHub: no check at all is
 green, a check that failed, still runs, was skipped, or is neutral on a draft
 is not. The other three are records, one small JSON file per run under
