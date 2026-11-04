@@ -196,7 +196,8 @@ github: <act> refused on <owner/name>#<n> at <head7>: not ready. Missing: <item>
 
 Under warn the act goes ahead with `github: <act> on <owner/name>#<n> is not
 ready, let through while the guard only warns. Missing: <item>`. A pull request
-opened out of draft is refused under enforce with `github: <act> refused: open it
+opened out of draft in the shell outside auto-merge is refused in both phases, as
+`gh pr ready` is, and anywhere under enforce with `github: <act> refused: open it
 as a draft, then leave draft once ready.`, and a readiness GitHub did not answer
 with `github: readiness of <owner/name>#<n> unverified: <error>`. Going back to
 draft always passes, and `gh pr create --draft` and `gh pr ready --undo` put

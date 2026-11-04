@@ -425,6 +425,11 @@ export function graphqlRefusal(kind: ActKind): string {
 
 // name: the command as the refusal names it, by default the gh command of that kind.
 export function autoMergeRefusal(kind: ActKind, repo: string, pr?: number, name?: string): string {
+  if (kind === 'create') {
+    return 'github: ' + (name ?? 'gh pr create') + ' refused on ' + repo + ': this repository is not in auto-merge,'
+      + ' so opening a pull request out of draft needs the operator\'s explicit word. Open it with --draft, or when'
+      + ' he gave it, run mcp__github__gh pr-create {"draft": false} on ' + repo + ': it asks him in the conversation.'
+  }
   const command = name ?? (kind === 'merge' ? 'gh pr merge' : 'gh pr ready')
   const tool = kind === 'merge' ? 'pr-merge' : 'pr-ready'
   return 'github: ' + command + ' refused on ' + repo + ': this repository is not in auto-merge, so a merge or'

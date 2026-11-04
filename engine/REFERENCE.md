@@ -340,7 +340,9 @@ Under the warn phase, the one this release ships (`CLAUDE_GITHUB_READY_ENFORCE=1
 enforce forward), it goes ahead with one transcript line, `github: <act> on
 <owner/name>#<n> is not ready, let through while the guard only warns. Missing: <item>`,
 and one JSON line `{at, session, repo, pr, head, act, route, missing}` in `guard-warn.log`,
-in the plugin's data directory. Under enforce, a pull request opened out of draft is
+in the plugin's data directory. In the shell, a pull request opened out of draft outside a
+repository in auto-merge is refused in both phases, naming the tool call that asks the
+operator (« Auto-merge split » below). Under enforce, a pull request opened out of draft is
 refused with `github: <act> refused: open it as a draft, then leave draft once ready.`,
 and a readiness `pr-gate` could not read with `github: readiness of <owner/name>#<n>
 unverified: <error>`. A shell merge or undraft that names no repository (`-R`, `--repo`

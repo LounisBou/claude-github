@@ -659,14 +659,35 @@ test('a Bash Ready label is the ready guard\'s in every repository', async ($, o
   })
 })
 
-test('a Bash pull request opened out of draft warns, then is refused under enforce', async ($, on) => {
+test('a Bash pull request opened out of draft is refused outside auto-merge in both phases', async ($, on) => {
   const seen = await world($, on)
-  await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
+  const warned: any = await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
+  expect(warned.deny).toBe('github: gh pr create refused on acme/thing: this repository is not in auto-merge, so opening'
+    + ' a pull request out of draft needs the operator\'s explicit word. Open it with --draft, or when he gave it, run'
+    + ' mcp__github__gh pr-create {"draft": false} on acme/thing: it asks him in the conversation.')
+  expect(seen.bash.length).toBe(0)
+  await inPhase('enforce', async () => {
+    const out: any = await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
+    expect(out.deny).toBe('github: gh pr create refused: open it as a draft, then leave draft once ready.')
+  })
+})
+
+test('a Bash pull request opened out of draft in auto-merge warns, then is refused under enforce', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/thing'] })
+  await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b "Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"'))
+  expect(seen.bash.length).toBe(1)
   expect(seen.logs[0]).toContain('opened out of draft')
   await inPhase('enforce', async () => {
     const out: any = await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
     expect(out.deny).toBe('github: gh pr create refused: open it as a draft, then leave draft once ready.')
   })
+})
+
+test('a Bash pull request opened out of draft with no repository named is refused in both phases', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/thing'] })
+  const out: any = await $.tool.call(bash('gh pr create -t "fix: x" -b body'))
+  expect(out.deny).toBe('github: gh pr create refused: name the repository with -R owner/name.')
+  expect(seen.bash.length).toBe(0)
 })
 
 // The engine run through Bash, as the github-curl skill runs it.
