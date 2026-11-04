@@ -77,8 +77,8 @@ async function runGh(
  *
  * Between the verdict and the run come the house rules of engine/WRITING.md:
  * the mechanical ones refuse a text before it leaves the machine, and the
- * approvals the file reserves to the person (a pull request out of draft) are
- * asked whatever the settings allow.
+ * approvals the file reserves to the person (a pull request out of draft, a
+ * merge) are asked whatever the settings allow.
  *
  * In a repository in auto-merge no write is put to the person: the reserved
  * approvals lift and an ask with no rule behind it runs. A deny and an ask
@@ -308,13 +308,14 @@ function describe(e: any): string {
 export const NEVER_GRANTED = new Set(['pr-merge', 'comment-delete'])
 
 // The approvals WRITING.md reserves to the person, asked whatever a rule or
-// the mode allows: a pull request leaves draft only on his word, except in a
-// repository he put in auto-merge (autoMerge), where nothing is reserved. The
+// the mode allows: a pull request leaves draft and is merged only on his word,
+// except in a repository he put in auto-merge (autoMerge), where nothing is reserved. The
 // description of his own draft is published and edited without asking, under
 // the writing rules.
 export function reservedToPerson(command: string, args: Record<string, unknown>, autoMerge = false): string | undefined {
   if (autoMerge) return undefined
   if (command === 'pr-ready') return 'Take a pull request out of draft:'
+  if (command === 'pr-merge') return 'Merge a pull request:'
   if (command === 'pr-create' && args.draft === false) return 'Open a pull request ready for review, not as a draft:'
   return undefined
 }
