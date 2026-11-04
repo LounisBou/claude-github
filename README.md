@@ -48,12 +48,13 @@ it. `/github:doctor` then confirms everything is ready.
 - **Writing rules enforced** — before a title, a description or a comment
   leaves the machine, the mod checks the mechanical rules of
   `engine/WRITING.md`: no semicolon in prose (code spans, fenced blocks and
-  URLs are not prose), no `Co-Authored-By` or `Claude-Session` trailer, a
+  URLs are not prose), no trailer of any kind (`Co-Authored-By`,
+  `Signed-off-by`, `Claude-Session`, any `<word>-by`, `Change-Id`), a
   title on one line and within 72 characters, no heading in a PR description,
   every CVE id in a PR description a link to its advisory, and a security
   update's tables, one per advisory. A PR description ends with the four
   sections `TODO Staging`, `TODO Prod`, `PRs Dependency` and `Related PRs`, in
-  that order, `none` where empty, and carries no horizontal rule but the `---`
+  that order, `none` where empty, with nothing after them, and carries no horizontal rule but the `---`
   between two screenshots, no other bold label (a screenshot's bold title, with
   no colon at its end, is none), and in its summary no pull request reference and no negative phrasing
   from a fixed list. The same rules hold for `gh pr create`, `gh pr edit`,
