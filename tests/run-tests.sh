@@ -791,6 +791,7 @@ F5="$WORK/fix5"; mkdir -p "$F5"
 gh5() { env GH_FIXTURES="$F5" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
 STACKED_MSG='Merging stacked PRs via this endpoint is not supported. Use the asynchronous merge endpoint instead.'
 MERGE_SHA=fedcba9876543210fedcba9876543210fedcba98
+check_status "pr-merge refuses a 64-character sha" 1 gh3 pr-merge 7 --sha "$(printf 'a%.0s' {1..64})"
 # sent_rows <dir> <method> <path-suffix>: how many recorded requests match.
 sent_rows() {
   python3 -c "
