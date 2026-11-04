@@ -40,7 +40,8 @@ it. `/github:doctor` then confirms everything is ready.
   engine's `error:` line; exit codes 1–5 are documented in
   `engine/REFERENCE.md`. Calls follow the session's permission rules: a
   `deny` rule refuses, reads run unless a rule asks, and every write asks
-  first unless a rule or the permission mode allows it. The dialog offers
+  first unless a rule or the permission mode allows it, leaving draft and a
+  merge excepted (below). The dialog offers
   « Allow for this session », which covers that one command on that one
   repository until the session ends; it is never offered for `pr-merge` or
   `comment-delete`, nor where an explicit rule asks.
@@ -62,8 +63,9 @@ it. `/github:doctor` then confirms everything is ready.
   A text that breaks one is refused with the rule, so it can be rewritten. A
   text the user typed in the prompt passes, and the same text sent again is
   put to the user. `pr-create` opens a draft unless the call says otherwise,
-  and leaving draft (`draft: false`, `pr-ready`) is always asked, whatever
-  the rules allow, except in a repository in auto-merge (below). An existing
+  and leaving draft (`draft: false`, `pr-ready`) and a merge (`pr-merge`) are
+  always asked, whatever the rules allow, except in a repository in auto-merge
+  (below). An existing
   description is replaced without asking, under the writing rules.
 - **Ready and Not Ready labels** — `pr-readiness <pr> ready|not-ready` puts
   the `Ready` (`27e760`) or `Not Ready` (`8c1455`) label on a pull request and

@@ -1016,6 +1016,34 @@ test('a pr-create out of draft and a pr-ready are asked even when a rule allows'
   expect(runs[0].args.draft).toBe(false)
 })
 
+test('a pr-merge is asked even when a rule allows, and Deny runs nothing', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  await startReading($)
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-merge', args: { pr: 1 } })
+  expect(asked.length).toBe(1)
+  expect(asked[0]).toContain('Merge a pull request')
+  expect(JSON.stringify(out)).toContain('refused gh pr-merge')
+  expect(acts(runs).length).toBe(0)
+})
+
+test('a pr-merge on a repository in auto-merge is not asked under an allow rule', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await startReading($)
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-merge', args: { pr: 1 }, repo: 'acme/thing' })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked.length).toBe(0)
+  expect(acts(runs).length).toBe(1)
+})
+
 test('a title-only pr-update under an allow rule is not asked', async ($, on) => {
   const runs: any[] = []
   const asked: string[] = []
