@@ -2267,6 +2267,26 @@ test('a gh pr create whose body file breaks a rule is refused once, then sendabl
   expect(bash).toEqual([command])
 })
 
+test('a gh.py text run through Bash keeps the writing rules, its --body-file read', async ($, on) => {
+  const bash: string[] = []
+  const asked: string[] = []
+  await stubBashLint($, on, bash, asked, 'Deny', { '/work/body.md': 'Adds the reset; at last.\n\n' + NONE, '/work/ok.md': 'Adds the reset.\n\n' + NONE })
+
+  const create: any = await $.tool.call({ tool: 'Bash', command: 'python3 engine/gh.py pr-create --title "feat: add the reset" --body-file body.md --draft' })
+  expect(create.deny).toContain('gh pr-create refused, its text breaks the writing rules:\n- body: no semicolon in prose')
+  const update: any = await $.tool.call({ tool: 'Bash', command: 'python3 "$GH" pr-update 12 --body-file body.md' })
+  expect(update.deny).toContain('gh pr-update refused, its text breaks the writing rules:\n- body: no semicolon in prose')
+  const other: any = await $.tool.call({ tool: 'Bash', command: 'python3 "$SCRIPT" build --body-file body.md' })
+  expect(other.deny).toBeUndefined()
+  const comment: any = await $.tool.call({ tool: 'Bash', command: '/x/engine/gh.py pr-comment 12 --body-file=body.md --repo acme/thing' })
+  expect(comment.deny).toContain('gh pr-comment refused, its text breaks the writing rules:\n- body: no semicolon in prose')
+  const title: any = await $.tool.call({ tool: 'Bash', command: 'python3 engine/gh.py pr-update 12 --title "fix: a; b"' })
+  expect(title.deny).toContain('- title: no semicolon in prose')
+  const clean: any = await $.tool.call({ tool: 'Bash', command: 'python3 engine/gh.py pr-update 12 --body-file ok.md' })
+  expect(clean.deny).toBeUndefined()
+  expect(asked).toEqual([])
+})
+
 test('a gh pr edit whose -b body lacks the sections is refused once, then sendable as it is', async ($, on) => {
   const bash: string[] = []
   const asked: string[] = []

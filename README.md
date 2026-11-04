@@ -58,7 +58,10 @@ it. `/github:doctor` then confirms everything is ready.
   between two screenshots, no other bold label (a screenshot's bold title, with
   no colon at its end, is none), and in its summary no pull request reference and no negative phrasing
   from a fixed list. The same rules hold for `gh pr create`, `gh pr edit`,
-  `gh pr comment` and `gh pr review` run through Bash, their `--body-file` read.
+  `gh pr comment` and `gh pr review` run through Bash, their `--body-file` read,
+  and for the engine's own subcommands run there (`python3 engine/gh.py
+  pr-update 12 --body-file body.md`). A request the engine reads from stdin
+  (`--stdin-json`) is left unchecked.
   A `--body` read from stdin or made by a command substitution other than a
   `$(cat <<'EOF' … EOF)` heredoc is left unchecked, as the hook cannot see it.
   A text that breaks one is refused with the rule, so it can be rewritten. A
@@ -181,7 +184,9 @@ and the writing rules above still apply.
 (`gh pr merge --auto` included) need the four conditions above, through the tool
 (`pr-ready`, `pr-merge`, `pr-readiness ready`, `label-add Ready`) and through the
 shell (`gh pr ready`, `gh pr merge`, `gh pr edit` or `gh issue edit` with
-`--add-label Ready`, `gh api` on a pull request's merge or labels). Under enforce
+`--add-label Ready`, `gh api` on a pull request's merge or labels, and the
+engine's own subcommands, `python3 engine/gh.py pr-merge 12 --repo owner/name`).
+Under enforce
 the act is refused before anyone is asked, and a pull request still carrying
 `Ready` goes back to `Not Ready`:
 
