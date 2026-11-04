@@ -186,7 +186,7 @@ shape is asked for.
 | `pr-url` | `pr-create`, `pr-status` | the HTML URL |
 | `pr-merge-status` | `pr-status` | `merged`, `open` or `closed` |
 | `pr-details` | `pr-status` | number, title, state, draft, head, base, url |
-| `checks-status` | `pr-checks` | `{"result": SUCCESS\|FAILURE\|PENDING, "failed_checks": [...]}` |
+| `checks-status` | `pr-checks` | `{"result": SUCCESS\|FAILURE\|PENDING, "failed_checks": [...]}`, the verdict `pr-gate` gives as `ci.result` |
 | `open-threads` | `pr-threads` | unresolved threads |
 | `resolved-threads` | `pr-threads` | resolved threads |
 | `thread-summary` | `pr-threads` | a markdown table of open threads |
