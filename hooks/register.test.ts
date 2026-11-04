@@ -788,7 +788,7 @@ test('a colour, a link to an anchor and a version before a #N are no pull reques
   for (const summary of [
     'Ships after #12.',
     'Ships after #1234.',
-    'Ships after geo-git-flow#21.',
+    'Ships after git-flow#21.',
     'Ships after claude.github#21.',
     'Ships after LounisBou/claude-code#15.',
   ]) {
