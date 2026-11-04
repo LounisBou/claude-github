@@ -628,6 +628,15 @@ test('the Ready label needs the four on a draft as out of draft', async ($, on) 
   })
 })
 
+test('the Ready label on a draft needs the four too', async ($, on) => {
+  await inPhase('enforce', async () => {
+    const seen = await world($, on, { records: {} })
+    const draft: any = await $.tool.call(gh('pr-readiness', { pr: 12, state: 'ready' }))
+    expect(draft.deny).toContain('not ready')
+    expect(commands(seen)).toEqual(['pr-gate'])
+  })
+})
+
 test('a Bash merge of the current branch\'s pull request reads it with pr-get', async ($, on) => {
   const seen = await world($, on, { autoMerge: ['acme/thing'], pulls: { '': [{ number: 12 }] } })
   await $.tool.call(bash('gh pr merge -R acme/thing'))
