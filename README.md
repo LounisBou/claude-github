@@ -52,8 +52,9 @@ it. `/github:doctor` then confirms everything is ready.
   every CVE id in a PR description a link to its advisory, and a security
   update's tables, one per advisory. A PR description ends with the four
   sections `TODO Staging`, `TODO Prod`, `PRs Dependency` and `Related PRs`, in
-  that order, `none` where empty, and carries no horizontal rule, no other bold
-  label, and in its summary no pull request reference and no negative phrasing
+  that order, `none` where empty, and carries no horizontal rule but the `---`
+  between two screenshots, no other bold label (a screenshot's bold title, with
+  no colon at its end, is none), and in its summary no pull request reference and no negative phrasing
   from a fixed list. The same rules hold for `gh pr create`, `gh pr edit`,
   `gh pr comment` and `gh pr review` run through Bash, their `--body-file` read.
   A `--body` read from stdin or made by a command substitution other than a

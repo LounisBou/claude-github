@@ -210,9 +210,9 @@ GitHub's web upload endpoint would produce a `user-attachments` URL, but it
 authenticates with browser session cookies rather than a scoped token. That route is
 deliberately not used: it would mean whole-account credentials on disk.
 
-`--title T` puts a short label above the image, as a bold line followed by the image
-with the title as alt text. A title is a short label, not a sentence — 60 characters
-or fewer, trimmed, one line:
+`--title T` puts the screenshot's descriptive title above its image, as a bold line
+followed by the image with the title as alt text (`WRITING.md` « Pull request
+descriptions »): one line, trimmed, 100 characters or fewer, with no colon at its end:
 
 ```
 python3 "$GH" image-upload screenshot.png --title "Login screen"

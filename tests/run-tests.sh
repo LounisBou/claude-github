@@ -1177,6 +1177,14 @@ for needle in 'leaves draft only once it is ready (see « Ready' 'A pull request
     "$(python3 -c 'import sys; print(1 if sys.argv[1] in open(sys.argv[2], encoding="utf-8").read() else 0)' "$needle" "$WRITINGDOC")"
 done
 
+for needle in 'Each screenshot is its descriptive title in bold, alone on its line' 'with no colon at its end' 'separated by a `---` line with a blank line before it' 'other than the `---` between two screenshots'; do
+  check "WRITING.md screenshots mention '$needle'" "1" \
+    "$(grep -qF -- "$needle" "$WRITINGDOC" && echo 1 || echo 0)"
+done
+check "WRITING.md asks for no plain caption under a screenshot" "0" "$(grep -c 'plain caption' "$WRITINGDOC")"
+check "REFERENCE.md gives the image title bound" "1" \
+  "$(grep -qF -- '100 characters or fewer' "$SKILLDOC" && echo 1 || echo 0)"
+
 titles_concise=$(python3 - "$WRITINGDOC" <<'PYTITLES'
 import sys
 lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
