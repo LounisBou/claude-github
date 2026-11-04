@@ -77,7 +77,9 @@ it. `/github:doctor` then confirms everything is ready.
   takes it out, on the operator's words quoted verbatim, and `auto-merge-list`
   prints the list (below).
 - **`/checks [pr]`** — combined CI status of a PR, with the failed checks
-  named, defaulting to the current branch's.
+  named, defaulting to the current branch's. It is the ready guard's verdict
+  (« Ready pull requests »): a skipped check, or a neutral one on a draft, is
+  `PENDING`, and the pane shows the same.
 - **`/threads [pr]`** — the open review threads of a PR, as a markdown table.
 - **`/prs`** — opens a pane listing every open PR: number, title and draft
   flag, plus CI state and comment count for the five newest, with a Refresh

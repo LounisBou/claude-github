@@ -287,6 +287,15 @@ check "checks-status folds a failing commit status into the verdict" "FAILURE" \
 check "checks-status names the failing legacy status" "ci/legacy" \
   "$(render checks-status '{"check_runs":[{"name":"build","status":"completed","conclusion":"success"}],"statuses":{"state":"failure","statuses":[{"state":"failure","context":"ci/legacy"}]}}' \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["failed_checks"][0])')"
+# checks-status gives the ready guard's verdict, the one pr-gate reads: a
+# skipped check proves nothing, and any conclusion but success, neutral or
+# skipped is a failure.
+check "checks-status never reads a skipped check as green" "PENDING" \
+  "$(render checks-status '{"check_runs":[{"name":"test","status":"completed","conclusion":"skipped"}],"statuses":{"statuses":[]}}' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"])')"
+check "checks-status names a check that failed to start" "FAILURE build" \
+  "$(render checks-status '{"check_runs":[{"name":"build","status":"completed","conclusion":"startup_failure"}],"statuses":{"statuses":[]}}' \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["result"], ",".join(d["failed_checks"]))')"
 check "open-threads keeps only unresolved" "1" \
   "$(render open-threads '[{"id":"a","isResolved":false},{"id":"b","isResolved":true}]' | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 check "resolve-status" "resolved" "$(render resolve-status '{"resolveReviewThread":{"thread":{"isResolved":true}}}')"
@@ -782,6 +791,7 @@ for line in open('$F3/sent.jsonl'):
 # reads as a race rather than as a typo: refuse it here, before any request.
 : > "$F3/sent.jsonl"
 check_status "pr-merge refuses a short sha" 1 gh3 pr-merge 7 --sha abc123
+check_status "pr-merge refuses a 64-character sha" 1 gh3 pr-merge 7 --sha "$(printf 'a%.0s' {1..64})"
 check "a refused sha sends no request" "0" "$(wc -l < "$F3/sent.jsonl" | tr -d ' ')"
 
 # A PR that GitHub counts as part of a stack refuses the synchronous endpoint
@@ -791,7 +801,6 @@ F5="$WORK/fix5"; mkdir -p "$F5"
 gh5() { env GH_FIXTURES="$F5" GH_TOKEN=x GH_REPO=acme/thing python3 "$GHDIR/gh.py" "$@"; }
 STACKED_MSG='Merging stacked PRs via this endpoint is not supported. Use the asynchronous merge endpoint instead.'
 MERGE_SHA=fedcba9876543210fedcba9876543210fedcba98
-check_status "pr-merge refuses a 64-character sha" 1 gh3 pr-merge 7 --sha "$(printf 'a%.0s' {1..64})"
 # sent_rows <dir> <method> <path-suffix>: how many recorded requests match.
 sent_rows() {
   python3 -c "
@@ -1901,6 +1910,11 @@ check "pr-gate never reads a neutral check on a draft as green" "PENDING  scan 1
 
 gate8 startup "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"build","status":"completed","conclusion":"startup_failure"},{"name":"lint","status":"completed","conclusion":"success"}]}'
 check "pr-gate reads a check that failed to start as failed" "FAILURE build  2" "$(ci8)"
+
+gate8 checks-draft "$(printf '%s' "$PULL8" | sed 's/"draft":false/"draft":true/')" '{"statuses":[]}' '{"check_runs":[]}'
+printf '%s' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}' > "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_check-runs.json"
+check "pr-checks reads a neutral check on a draft as pr-gate does" "PENDING" \
+  "$(gh8 pr-checks 12 --format checks-status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"])')"
 
 gate8 merged "$(printf '%s' "$PULL8" | sed 's/"state":"open"/"state":"closed","merged_at":"2026-11-01T00:00:00Z"/')" '{"statuses":[]}' '{"check_runs":[]}'
 check "pr-gate says merged for a merged pull request" "merged" \
