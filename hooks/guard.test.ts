@@ -669,6 +669,68 @@ test('a Bash pull request opened out of draft warns, then is refused under enfor
   })
 })
 
+// The engine run through Bash, as the github-curl skill runs it.
+const ENGINE = 'python3 /plugins/github/engine/gh.py'
+
+test('a Bash merge through gh.py is refused outside auto-merge, as gh pr merge is', async ($, on) => {
+  const seen = await world($, on)
+  const out: any = await $.tool.call(bash(ENGINE + ' pr-merge 12 --repo acme/thing --method squash'))
+  expect(out.deny).toBe('github: gh.py pr-merge refused on acme/thing: this repository is not in auto-merge, so a merge or'
+    + ' leaving draft needs the operator\'s explicit word. When he gave it, run mcp__github__gh pr-merge {"pr": 12} on'
+    + ' acme/thing: it checks that the pull request is ready, then asks him in the conversation.')
+  expect(seen.bash.length).toBe(0)
+})
+
+test('a Bash merge through gh.py in auto-merge meets the ready guard', async ($, on) => {
+  const seen = await world($, on, { ...NO_RECORDS, autoMerge: ['acme/thing'] })
+  await $.tool.call(bash(ENGINE + ' --repo=acme/thing pr-merge 12'))
+  expect(seen.bash.length).toBe(1)
+  expect(seen.logs[0]).toContain('github: gh.py pr-merge on acme/thing#12 is not ready')
+  await inPhase('enforce', async () => {
+    const out: any = await $.tool.call(bash('/plugins/github/engine/gh.py pr-merge 12 --repo acme/thing'))
+    expect(out.deny).toContain('github: gh.py pr-merge refused on acme/thing#12 at 0123456: not ready.')
+  })
+})
+
+test('a Bash merge or undraft through gh.py with no --repo is refused in both phases', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/thing'] })
+  for (const command of [ENGINE + ' pr-merge 12', ENGINE + ' pr-ready 12']) {
+    const out: any = await $.tool.call(bash(command))
+    expect(out.deny, command).toBe('github: gh.py ' + command.split(' ')[2] + ' refused: name the repository with --repo owner/name.')
+  }
+  expect(seen.bash.length).toBe(0)
+})
+
+test('a Bash undraft through gh.py passes for CI with --for-ci only', async ($, on) => {
+  const seen = await world($, on, { ...NO_RECORDS, ci: { result: 'PENDING', skipped: ['test'] } })
+  const forCi: any = await $.tool.call(bash(ENGINE + ' pr-ready 12 --for-ci --repo acme/thing'))
+  expect(forCi.deny).toBeUndefined()
+  expect(seen.logs).toEqual(['github: acme/thing#12 out of draft to run CI, still Not Ready'])
+  const ready: any = await $.tool.call(bash(ENGINE + ' pr-ready 12 --repo acme/thing'))
+  expect(ready.deny).toContain('github: gh.py pr-ready refused on acme/thing: this repository is not in auto-merge')
+  expect(seen.bash.length).toBe(1)
+})
+
+test('a Bash Ready label through gh.py needs the four under enforce', async ($, on) => {
+  await inPhase('enforce', async () => {
+    const seen = await world($, on, NO_RECORDS)
+    for (const command of [ENGINE + ' pr-readiness 12 ready --repo acme/thing', ENGINE + ' label-add 12 bug Ready --repo acme/thing']) {
+      const out: any = await $.tool.call(bash(command))
+      expect(out.deny, command).toContain('refused on acme/thing#12 at 0123456: not ready.')
+    }
+    expect(seen.bash.length).toBe(0)
+  })
+})
+
+test('gh.py reads that act on nothing, and a --stdin-json request, pass the ready guard unread', async ($, on) => {
+  const seen = await world($, on)
+  await $.tool.call(bash(ENGINE + ' pr-get --format pr-number'))
+  await $.tool.call(bash(ENGINE + ' pr-readiness 12 not-ready --repo acme/thing'))
+  await $.tool.call(bash('printf %s \'{"command":"pr-merge","args":{"pr":12}}\' | ' + ENGINE + ' --stdin-json'))
+  expect(seen.bash.length).toBe(3)
+  expect(commands(seen)).toEqual([])
+})
+
 test('a Bash draft opened gets Not Ready from the URL gh printed', async ($, on) => {
   const seen = await world($, on, { bashResult: { result: { stdout: 'https://github.com/acme/thing/pull/31\n', stderr: '', interrupted: false } } })
   await $.tool.call(bash('gh pr create --draft -t "fix: x" -b "Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"'))

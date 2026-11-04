@@ -324,7 +324,9 @@ github: read <root>/engine/WRITING.md with the Read tool, whole, before <command
 `--add-label Ready`, `gh pr create` without `--draft`, `gh api` with `PUT` or `POST` on
 `repos/<o>/<r>/pulls/<n>/merge` or on `repos/<o>/<r>/issues/<n>/labels` with `Ready`, and
 `gh api graphql` naming `mergePullRequest`, `markPullRequestReadyForReview` or
-`enablePullRequestAutoMerge`, need the pull request ready at its head: a clean review, a
+`enablePullRequestAutoMerge`, and the same subcommands of the engine run from Bash
+(`python3 <root>/engine/gh.py pr-merge 12 --repo owner/name`, its script given by its path or
+by a shell variable followed by its subcommand), need the pull request ready at its head: a clean review, a
 passed norms check and passed or waived E2E recorded at the head `pr-gate` reads (« Records »
 above), and green CI. A `--match-head-commit` or a `pr-merge --sha` other than that head
 is not ready either. Under the enforce phase the act is refused before any question, and a
@@ -357,12 +359,18 @@ the push to <branch>`; a branch or a repository the push does not name with cert
 left as it is, with one line.
 
 **Auto-merge split.** In the shell, a merge or leaving draft (CI undraft aside) runs only
-in a repository listed in `auto-merge.json`, the ready guard applying on top. Elsewhere it
-is refused in both phases:
+in a repository listed in `auto-merge.json`, the ready guard applying on top, through `gh`
+and through the engine alike. The engine's undraft is a CI undraft only with `--for-ci`, and
+the engine names its repository with `--repo`. Elsewhere it is refused in both phases:
 
 ```
 github: <gh pr merge | gh pr ready> refused on <owner/name>: this repository is not in auto-merge, so a merge or leaving draft needs the operator's explicit word. When he gave it, run mcp__github__gh <pr-merge | pr-ready> {"pr": <n>} on <owner/name>: it checks that the pull request is ready, then asks him in the conversation.
 ```
+
+The engine run from Bash keeps the writing rules too: the `--title` of `pr-create` and
+`pr-update`, and the file a `--body-file` names, are linted as the tool's call would be. A
+request the engine reads from stdin (`gh.py --stdin-json`) is not on the command line: the
+guards do not see it, and neither do they see a `--comments-file`.
 
 **Records.** A Write, an Edit or a MultiEdit under the records root, and a shell command
 naming that root, a `pr-records/` path or `engine/record.py`, are refused, whatever the command

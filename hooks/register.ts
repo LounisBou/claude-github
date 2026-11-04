@@ -181,7 +181,7 @@ async function bashLint($: any, line: string): Promise<string | undefined> {
     }
     const found = lint(text.command, args, lastTyped)
     if (found.length === 0) continue
-    const command = text.name.slice('gh '.length)
+    const command = text.name.startsWith('gh ') ? text.name.slice('gh '.length) : text.command
     const print = JSON.stringify(['Bash', text.argv, args])
     if (!refusedOnce.has(print)) {
       refusedOnce.add(print)
@@ -877,6 +877,12 @@ function toolReady($: any, e: any, act: Act) {
   }
 }
 
+// The engine's own name for an act run through gh.py, which its refusals keep;
+// a gh act is named by the gh command of its kind.
+function engineName(act: Act): string | undefined {
+  return act.name.startsWith('gh.py ') ? act.name : undefined
+}
+
 // The Bash act's refusal, or undefined; what must follow its success goes in after.
 async function bashReady($: any, act: Act, after: Array<(result: any) => Promise<void>>): Promise<string | undefined> {
   const readyPhase = await phaseOf($)
@@ -911,7 +917,7 @@ async function bashReady($: any, act: Act, after: Array<(result: any) => Promise
   }
   const repo = act.repo
   const listed = act.kind === 'ready-label' ? false : (await autoMergeRepos($)).has(repo.toLowerCase())
-  if (act.kind === 'merge' && !listed) return autoMergeRefusal('merge', repo, act.pr)
+  if (act.kind === 'merge' && !listed) return autoMergeRefusal('merge', repo, act.pr, engineName(act))
   let pr = act.pr
   let lookup = ''
   if (pr === undefined) {
@@ -924,12 +930,13 @@ async function bashReady($: any, act: Act, after: Array<(result: any) => Promise
   }
   const r: Readiness = pr === undefined ? { missing: [], error: lookup } : await readiness($, repo, pr, act.sha)
   if (act.kind === 'undraft') {
-    if (r.gate && ciUndraft(r.gate) && pr !== undefined) {
+    // The engine leaves draft for CI only when told to (--for-ci): without it, it puts Ready on.
+    if (r.gate && ciUndraft(r.gate) && pr !== undefined && act.forCi !== false) {
       const n = pr
       after.push(async () => note($, ciUndraftLine(repo, n)))
       return undefined
     }
-    if (!listed) return autoMergeRefusal('undraft', repo, pr)
+    if (!listed) return autoMergeRefusal('undraft', repo, pr, engineName(act))
   }
   const shown = pr ?? '?'
   if (r.error) {
