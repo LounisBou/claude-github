@@ -400,6 +400,50 @@ for (const phase of ['warn', 'enforce'] as const) {
   }
 }
 
+// A Bash merge outside auto-merge is refused on the list alone, before any
+// readiness read, so a guard that would throw on the read changes nothing. An undraft
+// reads the readiness first, as a CI undraft passes outside auto-merge: its failure
+// is the unverified row, a warn line under warn and a refusal under enforce.
+for (const phase of ['warn', 'enforce'] as const) {
+  test(phase + ': a Bash merge outside auto-merge is refused on the list before any readiness read', async ($, on) => {
+    await inPhase(phase, async () => {
+      const seen = await world($, on, { gate: BROKEN_GATE, autoMerge: ['acme/other'] })
+      const out: any = await $.tool.call(bash('gh pr merge 12 -R acme/thing --squash'))
+      expect(out.deny).toContain('github: gh pr merge refused on acme/thing: this repository is not in auto-merge')
+      expect(seen.bash.length).toBe(0)
+      expect(commands(seen)).toEqual([])
+    })
+  })
+
+  test(phase + ': a Bash undraft outside auto-merge whose guard throws reads as unverified readiness', async ($, on) => {
+    await inPhase(phase, async () => {
+      const seen = await world($, on, { gate: BROKEN_GATE, autoMerge: ['acme/other'] })
+      const out: any = await $.tool.call(bash('gh pr ready 12 -R acme/thing'))
+      if (phase === 'enforce') {
+        expect(String(out.deny)).toStartWith('github: readiness of acme/thing#12 unverified: ')
+        expect(seen.bash.length).toBe(0)
+      } else {
+        expect(out.deny).toBeUndefined()
+        expect(seen.bash.length).toBe(1)
+        expect(seen.logs.length).toBe(1)
+        expect(seen.logs[0]).toContain('readiness unverified: ')
+      }
+    })
+  })
+
+  test(phase + ': a Bash pull request opened out of draft outside auto-merge is refused whatever the readiness read gives', async ($, on) => {
+    await inPhase(phase, async () => {
+      const seen = await world($, on, { gate: BROKEN_GATE, autoMerge: ['acme/other'] })
+      const out: any = await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
+      expect(String(out.deny)).toContain(phase === 'enforce'
+        ? 'github: gh pr create refused: open it as a draft'
+        : 'github: gh pr create refused on acme/thing: this repository is not in auto-merge')
+      expect(seen.bash.length).toBe(0)
+      expect(commands(seen)).toEqual([])
+    })
+  })
+}
+
 // ---- leaving draft for CI ----
 
 for (const phase of ['warn', 'enforce'] as const) {
