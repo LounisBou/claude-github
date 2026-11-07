@@ -13,7 +13,7 @@ import {
 import {
   PRUNE_DAYS, PRUNE_EVERY_MS, RECORDS_REFUSAL, autoMergeRefusal, bashActs, bashPushes, carriesReady, ciUndraft,
   ciUndraftLine, createdPr, draftRefusal, graphqlRefusal, missingItems, notReadyRefusal, parseGate, producerSlug,
-  recordKindFor, toolAct, touchesRecords, unnamedRepoRefusal, unverifiedRefusal, warnLine,
+  recordKindFor, toolAct, touchesRecords, unnamedRepoRefusal, unreadablePrRefusal, unverifiedRefusal, warnLine,
   type Act, type Gate, type Phase, type RecordFile,
 } from './ready.ts'
 
@@ -77,8 +77,8 @@ async function runGh(
  *
  * Between the verdict and the run come the house rules of engine/WRITING.md:
  * the mechanical ones refuse a text before it leaves the machine, and the
- * approvals the file reserves to the person (a pull request out of draft) are
- * asked whatever the settings allow.
+ * approvals the file reserves to the person (a pull request out of draft, a
+ * merge) are asked whatever the settings allow.
  *
  * In a repository in auto-merge no write is put to the person: the reserved
  * approvals lift and an ask with no rule behind it runs. A deny and an ask
@@ -181,7 +181,7 @@ async function bashLint($: any, line: string): Promise<string | undefined> {
     }
     const found = lint(text.command, args, lastTyped)
     if (found.length === 0) continue
-    const command = text.name.slice('gh '.length)
+    const command = text.name.startsWith('gh ') ? text.name.slice('gh '.length) : text.command
     const print = JSON.stringify(['Bash', text.argv, args])
     if (!refusedOnce.has(print)) {
       refusedOnce.add(print)
@@ -308,13 +308,14 @@ function describe(e: any): string {
 export const NEVER_GRANTED = new Set(['pr-merge', 'comment-delete'])
 
 // The approvals WRITING.md reserves to the person, asked whatever a rule or
-// the mode allows: a pull request leaves draft only on his word, except in a
-// repository he put in auto-merge (autoMerge), where nothing is reserved. The
+// the mode allows: a pull request leaves draft and is merged only on his word,
+// except in a repository he put in auto-merge (autoMerge), where nothing is reserved. The
 // description of his own draft is published and edited without asking, under
 // the writing rules.
 export function reservedToPerson(command: string, args: Record<string, unknown>, autoMerge = false): string | undefined {
   if (autoMerge) return undefined
   if (command === 'pr-ready') return 'Take a pull request out of draft:'
+  if (command === 'pr-merge') return 'Merge a pull request:'
   if (command === 'pr-create' && args.draft === false) return 'Open a pull request ready for review, not as a draft:'
   return undefined
 }
@@ -792,8 +793,13 @@ async function refuseNotReady($: any, act: Act, repo: string, pr: number, r: Rea
 
 // The Bash ready guard failed on its own: under warn the command goes on with
 // a warn line, under enforce it is refused as a readiness that could not be read.
+// An undraft outside auto-merge is refused on the list first, in both phases: only a CI
+// undraft passes there, and the failed read cannot tell whether this is one.
 async function guardThrew($: any, act: Act | undefined, err: any): Promise<string | undefined> {
   const error = String(err?.message ?? err).trim()
+  if (act?.kind === 'undraft' && act.repo && !(await autoMergeRepos($)).has(act.repo.toLowerCase())) {
+    return autoMergeRefusal('undraft', act.repo, act.pr, engineName(act))
+  }
   if (await phaseOf($) === 'enforce') return unverifiedRefusal(act?.repo, act?.pr, error)
   const named: Act = act ?? { kind: 'merge', name: 'the command' }
   await warnAct($, named, 'bash', act?.repo ?? '?', act?.pr ?? '?', '', ['readiness unverified: ' + error])
@@ -876,12 +882,22 @@ function toolReady($: any, e: any, act: Act) {
   }
 }
 
+// The engine's own name for an act run through gh.py, which its refusals keep;
+// a gh act is named by the gh command of its kind.
+function engineName(act: Act): string | undefined {
+  return act.name.startsWith('gh.py ') ? act.name : undefined
+}
+
 // The Bash act's refusal, or undefined; what must follow its success goes in after.
 async function bashReady($: any, act: Act, after: Array<(result: any) => Promise<void>>): Promise<string | undefined> {
   const readyPhase = await phaseOf($)
   if (act.kind === 'create') {
     if (readyPhase === 'enforce') return draftRefusal(act.name)
-    await warnAct($, act, 'bash', act.repo ?? '?', '?', '', ['opened out of draft'])
+    // Opening out of draft is leaving draft: outside auto-merge it needs the
+    // operator's word, which the tool asks for, as gh pr ready does.
+    if (!act.repo) return unnamedRepoRefusal(act.name)
+    if (!(await autoMergeRepos($)).has(act.repo.toLowerCase())) return autoMergeRefusal('create', act.repo, undefined, engineName(act))
+    await warnAct($, act, 'bash', act.repo, '?', '', ['opened out of draft'])
     return undefined
   }
   if (act.kind === 'create-draft') {
@@ -901,6 +917,7 @@ async function bashReady($: any, act: Act, after: Array<(result: any) => Promise
     return undefined
   }
   if (act.unnamed) return graphqlRefusal(act.kind)
+  if (act.unreadable) return unreadablePrRefusal(act.name)
   if (!act.repo) {
     // A merge or leaving draft is refused in both phases, as the auto-merge
     // split needs the repository. The Ready label is the ready guard's alone.
@@ -910,7 +927,7 @@ async function bashReady($: any, act: Act, after: Array<(result: any) => Promise
   }
   const repo = act.repo
   const listed = act.kind === 'ready-label' ? false : (await autoMergeRepos($)).has(repo.toLowerCase())
-  if (act.kind === 'merge' && !listed) return autoMergeRefusal('merge', repo, act.pr)
+  if (act.kind === 'merge' && !listed) return autoMergeRefusal('merge', repo, act.pr, engineName(act))
   let pr = act.pr
   let lookup = ''
   if (pr === undefined) {
@@ -923,12 +940,13 @@ async function bashReady($: any, act: Act, after: Array<(result: any) => Promise
   }
   const r: Readiness = pr === undefined ? { missing: [], error: lookup } : await readiness($, repo, pr, act.sha)
   if (act.kind === 'undraft') {
-    if (r.gate && ciUndraft(r.gate) && pr !== undefined) {
+    // The engine leaves draft for CI only when told to (--for-ci): without it, it puts Ready on.
+    if (r.gate && ciUndraft(r.gate) && pr !== undefined && act.forCi !== false) {
       const n = pr
       after.push(async () => note($, ciUndraftLine(repo, n)))
       return undefined
     }
-    if (!listed) return autoMergeRefusal('undraft', repo, pr)
+    if (!listed) return autoMergeRefusal('undraft', repo, pr, engineName(act))
   }
   const shown = pr ?? '?'
   if (r.error) {
@@ -1313,8 +1331,8 @@ export function register(on: any): void {
         description:
           'Record the end-to-end tests of a pull request at its head commit: pass, fail, or waived by '
           + 'the operator in his own words. Run from a clean checkout at the pull request\'s head, after '
-          + 'the tests ran there. A waiver\'s detail quotes words he typed in this session, with their date '
-          + '(YYYY-MM-DD). Reviews and norms checks are recorded by their own tools. See '
+          + 'the tests ran there. A waiver\'s detail quotes words he typed in this session, or his answer '
+          + 'recorded in the round for that pull request, with their date (YYYY-MM-DD). Reviews and norms checks are recorded by their own tools. See '
           + root + '/engine/REFERENCE.md « Records ».',
         inputSchema: {
           type: 'object',

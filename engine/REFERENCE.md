@@ -56,7 +56,9 @@ full sha, `labels` the names it carries. `ci.total` counts the check runs plus t
 commit statuses at that head. `ci.result` is `FAILURE` when one failed (`ci.failed`
 names them), `PENDING` when one still runs (`ci.running` counts them) or when one
 proved nothing: `skipped`, or `neutral` on a draft (`ci.skipped` names them), and
-`SUCCESS` otherwise, no check at all included.
+`SUCCESS` otherwise, no check at all included. A check that was skipped never turns green
+by itself: it reads `PENDING` for as long as it stays skipped, in `checks-status` as in
+`pr-gate`.
 
 `file-at-ref` returns `content`, plus `binary`. When the file is not valid UTF-8,
 `binary` is true and `content` holds base64 — the bytes are never decoded lossily.
@@ -157,7 +159,8 @@ Answered by the mod, not by `gh.py`: the list is a file on this machine,
 | `auto-merge-set` | `{"repo": "owner/name", "on": true\|false, "words": "<his words, verbatim>"}` | Put the repository in auto-merge (`on: true`) or take it out (`on: false`), on the operator's quoted word |
 | `auto-merge-list` | | The repositories in auto-merge, one per line, or `no repository in auto-merge` |
 
-`auto-merge-set` needs `words` of at least 8 characters found verbatim, whitespace
+`auto-merge-set` needs `words` of at least 8 characters, naming auto-merge (« auto-merge »,
+« auto merge » or « automerge »), found verbatim, whitespace
 normalised, in a prompt the operator typed in this session, or quoting an answer he gave
 through the pane, the coordinator or a tab, as the round store records it for a question
 that speaks of auto-merge and names the repository. A peer's message is not his word.
@@ -186,7 +189,7 @@ shape is asked for.
 | `pr-url` | `pr-create`, `pr-status` | the HTML URL |
 | `pr-merge-status` | `pr-status` | `merged`, `open` or `closed` |
 | `pr-details` | `pr-status` | number, title, state, draft, head, base, url |
-| `checks-status` | `pr-checks` | `{"result": SUCCESS\|FAILURE\|PENDING, "failed_checks": [...]}` |
+| `checks-status` | `pr-checks` | `{"result": SUCCESS\|FAILURE\|PENDING, "failed_checks": [...]}`, the verdict `pr-gate` gives as `ci.result` |
 | `open-threads` | `pr-threads` | unresolved threads |
 | `resolved-threads` | `pr-threads` | resolved threads |
 | `thread-summary` | `pr-threads` | a markdown table of open threads |
@@ -213,7 +216,11 @@ deliberately not used: it would mean whole-account credentials on disk.
 `--title T` puts the screenshot's descriptive title above its image, as a bold line
 followed by the image with the title as alt text (`WRITING.md` « Pull request
 descriptions »): one line, trimmed, 100 characters or fewer, with no colon at its end. Asterisks and
-closing brackets are taken out of it, as they would break the bold line or the alt text:
+closing brackets are taken out of it, as they would break the bold line or the alt text. A title
+the description rules would refuse is refused too, so the block always passes them: a semicolon,
+a `#N` or `repo#N` reference or a pull request URL, and the phrasings that say what a pull
+request does not do (`unchanged`, `does not`, `without conflict`…, the list of « Pull request
+descriptions »):
 
 ```
 python3 "$GH" image-upload screenshot.png --title "Login screen"
@@ -284,13 +291,13 @@ Requires push access to the repository.
 | claude-review `auto-fix-loop` | review | `hooks/loop.ts`, `act()`, branch `findings` → `exit: clean`, and branch `begin_pass` → `exit: max_passes` | `exit: clean`: `pass`, detail `clean at pass <n>`. `exit: max_passes`: `fail`, detail `<k> findings left after <n> passes`. Repo from `git remote get-url origin`, head from `git rev-parse HEAD`, PR from `$.tool.call({tool: 'mcp__github__gh', command: 'pr-get', args: {format: 'pr-number'}})`. No record when tracked files are dirty (`git status --porcelain -uno` not empty) or the branch has no PR. The tool's answer then gains `record: none — <why>`, and SKILL.md Step 7 prints that line |
 | norms `/norms:check` | norms | New tool `mcp__norms__check_done` in a new `hooks/record.ts`, registered in `hooks/register.ts` | `commands/check.md` Step 5 (zero findings) and Step 8 call it with `{open, fixed, passed}`. Result `pass` when `open` is 0, `fail` otherwise. Head from `git rev-parse HEAD` at the call, so the commits of 7.4 are covered. Refused unless `/norms:check` computed its scope in this session (the `command.run` hook of `hooks/check.ts` sets that mark), and no record on a dirty tree or with no PR, as above |
 | orchestrator review round | review, norms, e2e | `skills/orchestrator/scripts/dispatch-record.sh`, subcommand `ready`, on its two green branches (« reviewed at » and « corrected and verified at ») | Three calls to `record.py` at `--head`: review `pass` (detail `reviewed at <h>` or `reviewed at <h>, corrected and verified at <h2>`), norms `pass` (detail `norms check tool` or `none`), e2e `pass`, or `waived` with the waiver or exemption words (detail = the E2E line as `ready` records it). `ready` gains `--pr <owner/repo>#<n>`, required, and the `--ui` row's PR stops being the only source. It refuses a head shorter than 40 hex and refuses with no review recorded. The printed label command stays |
-| any session that runs the E2E | e2e | New github tool `mcp__github__record` (module-only, outside `COMMANDS`) | `{pr, repo?, result: pass\|fail\|waived, detail}`. The module checks that the checkout's `HEAD` equals the PR head read by `pr-gate`, and that the tree is clean, then calls `record.py` with producer `session-e2e`. `waived` needs a detail found verbatim in a prompt the operator typed in this session (`composer` or `bridge` origin, kept by the module as `lastTyped` is today) and carrying a date. `review` and `norms` are not accepted from a session: they have their producers. Called from claude-review's hooks the tool writes `review`, from the norms plugin's `norms`, each its own kind only |
+| any session that runs the E2E | e2e | New github tool `mcp__github__record` (module-only, outside `COMMANDS`) | `{pr, repo?, result: pass\|fail\|waived, detail}`. The module checks that the checkout's `HEAD` equals the PR head read by `pr-gate`, and that the tree is clean, then calls `record.py` with producer `session-e2e`. `waived` needs a detail found verbatim in a prompt the operator typed in this session (`composer` or `bridge` origin, kept by the module as `lastTyped` is today), or quoting his answer recorded in the round for that pull request (« Guards » below), and carrying a date. `review` and `norms` are not accepted from a session: they have their producers. Called from claude-review's hooks the tool writes `review`, from the norms plugin's `norms`, each its own kind only |
 
 Not producers: `start-review` (a walkthrough the operator submits himself) and `process-comments` (answers to comments). A human `APPROVED` review on GitHub is no record.
 
 ### What the contract does not stop
 
-A session that writes a file by hand under the root, or runs `record.py` itself, forges a record. The records guard (« Guards » below) refuses a model call that names the root or `record.py` in a Write, an Edit or a Bash command. It does not see a script that does it internally (`dispatch-record.sh` does, by design). The guards stop a forgotten review, norms check or E2E. They do not stop a session set on forging one.
+A session that writes a file by hand under the root, or runs `record.py` itself, forges a record. The records guard (« Guards » below) refuses a Write or an Edit under the root, and a Bash command naming the root, a `pr-records/` path or `engine/record.py`. It does not see a script that does it internally (`dispatch-record.sh` does, by design). The guards stop a forgotten review, norms check or E2E. They do not stop a session set on forging one.
 
 ## Pushing from the sandbox
 
@@ -323,7 +330,9 @@ github: read <root>/engine/WRITING.md with the Read tool, whole, before <command
 `--add-label Ready`, `gh pr create` without `--draft`, `gh api` with `PUT` or `POST` on
 `repos/<o>/<r>/pulls/<n>/merge` or on `repos/<o>/<r>/issues/<n>/labels` with `Ready`, and
 `gh api graphql` naming `mergePullRequest`, `markPullRequestReadyForReview` or
-`enablePullRequestAutoMerge`, need the pull request ready at its head: a clean review, a
+`enablePullRequestAutoMerge`, and the same subcommands of the engine run from Bash
+(`python3 <root>/engine/gh.py pr-merge 12 --repo owner/name`, its script given by its path or
+by a shell variable followed by its subcommand), need the pull request ready at its head: a clean review, a
 passed norms check and passed or waived E2E recorded at the head `pr-gate` reads (« Records »
 above), and green CI. A `--match-head-commit` or a `pr-merge --sha` other than that head
 is not ready either. Under the enforce phase the act is refused before any question, and a
@@ -337,7 +346,9 @@ Under the warn phase, the one this release ships (`CLAUDE_GITHUB_READY_ENFORCE=1
 enforce forward), it goes ahead with one transcript line, `github: <act> on
 <owner/name>#<n> is not ready, let through while the guard only warns. Missing: <item>`,
 and one JSON line `{at, session, repo, pr, head, act, route, missing}` in `guard-warn.log`,
-in the plugin's data directory. Under enforce, a pull request opened out of draft is
+in the plugin's data directory. In the shell, a pull request opened out of draft outside a
+repository in auto-merge is refused in both phases, naming the tool call that asks the
+operator (« Auto-merge split » below). Under enforce, a pull request opened out of draft is
 refused with `github: <act> refused: open it as a draft, then leave draft once ready.`,
 and a readiness `pr-gate` could not read with `github: readiness of <owner/name>#<n>
 unverified: <error>`. A shell merge or undraft that names no repository (`-R`, `--repo`
@@ -356,12 +367,32 @@ the push to <branch>`; a branch or a repository the push does not name with cert
 left as it is, with one line.
 
 **Auto-merge split.** In the shell, a merge or leaving draft (CI undraft aside) runs only
-in a repository listed in `auto-merge.json`, the ready guard applying on top. Elsewhere it
-is refused in both phases:
+in a repository listed in `auto-merge.json`, the ready guard applying on top, through `gh`
+and through the engine alike. The engine's undraft is a CI undraft only with `--for-ci`, and
+the engine names its repository with `--repo`. Elsewhere it is refused in both phases:
 
 ```
 github: <gh pr merge | gh pr ready> refused on <owner/name>: this repository is not in auto-merge, so a merge or leaving draft needs the operator's explicit word. When he gave it, run mcp__github__gh <pr-merge | pr-ready> {"pr": <n>} on <owner/name>: it checks that the pull request is ready, then asks him in the conversation.
 ```
+
+The engine run from Bash keeps the writing rules too: `pr-create`, `pr-comment`, a
+`pr-update` with a title or a body, and `review-submit`, `thread-reply`, `comment-edit`,
+`review-pending-create` and `review-pending-add` with a body file or a comments file wait for
+`WRITING.md` to be read, as `gh pr create`, `gh pr comment` and `gh pr edit` do, and the `--title` of `pr-create` and `pr-update`, and the
+file a `--body-file` names, are linted as the tool's call would be. An engine act whose
+pull request number cannot be read from the command (`pr-merge {}` fed by an `xargs`,
+`pr-merge "$PR"`) is refused in both phases, never read against the current branch's pull
+request: write the number, or call the tool.
+
+What the guards do not read on that route:
+
+- A request the engine reads from stdin (`gh.py --stdin-json`) is not on the command line:
+  the guards do not see it. Nor do they see an engine script given by a shell variable that is
+  not followed by one of its subcommands, `$PY engine/gh.py …`, `eval`, `uv run`, or an
+  unquoted `${CLAUDE_PLUGIN_ROOT}/engine/gh.py`: run it as `python3 "<root>/engine/gh.py" …`.
+- A `--comments-file` is not read, so its inline comments are not linted.
+- A body file written by the same command line (`printf … > body.md && python3 gh.py
+  pr-create --body-file body.md`) is read before it exists, so it is not linted.
 
 **Records.** A Write, an Edit or a MultiEdit under the records root, and a shell command
 naming that root, a `pr-records/` path or `engine/record.py`, are refused, whatever the command

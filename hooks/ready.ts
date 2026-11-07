@@ -4,7 +4,7 @@
 // head. Pure functions only: register.ts reads GitHub, the records and the
 // session, and answers the calls.
 
-import { gitSubcommand, simpleCommands } from './shell.ts'
+import { type EngineCall, engineCall, engineFlag, engineOption, gitSubcommand, simpleCommands } from './shell.ts'
 
 // warn: an act that is not ready goes ahead with one warn line. enforce: it is
 // refused with what it misses.
@@ -28,6 +28,12 @@ export type Act = {
   sha?: string
   // The command names no pull request a reader can find (a GraphQL mutation).
   unnamed?: boolean
+  // The engine was given no pull request number a reader can find (`{}` of an
+  // xargs, `$PR`): never read as the current branch's pull request.
+  unreadable?: boolean
+  // An undraft through the engine: whether it asks for CI only (`--for-ci`),
+  // which keeps Not Ready. A gh pr ready leaves it unset.
+  forCi?: boolean
 }
 
 // What pr-gate answers.
@@ -107,6 +113,15 @@ function has(parsed: Parsed, ...flags: string[]): boolean {
   return parsed.opts.some(([flag]) => flags.includes(flag))
 }
 
+// A boolean flag as gh reads it: bare or `=true` is set, `=false`, `=f` or `=0` is not,
+// and the last occurrence wins.
+function flagSet(parsed: Parsed, ...flags: string[]): boolean {
+  const given = parsed.opts.filter(([flag]) => flags.includes(flag))
+  if (given.length === 0) return false
+  const value = given[given.length - 1][1]
+  return value === undefined || !/^(false|f|0)$/i.test(value)
+}
+
 function values(parsed: Parsed, ...flags: string[]): string[] {
   return parsed.opts.filter(([flag, value]) => flags.includes(flag) && value !== undefined).map(([, value]) => value as string)
 }
@@ -162,7 +177,7 @@ function prAct(argv: string[]): Act | undefined {
   }
   if (verb === 'create') {
     // A pull request opened with the Ready label is opened as ready.
-    const draft = has(parsed, '-d', '--draft') && !namesReady(values(parsed, '-l', '--label'))
+    const draft = flagSet(parsed, '-d', '--draft') && !namesReady(values(parsed, '-l', '--label'))
     return { ...base, kind: draft ? 'create-draft' : 'create' }
   }
   return undefined
@@ -202,13 +217,32 @@ function apiAct(argv: string[]): Act | undefined {
   return undefined
 }
 
+// The act of one run of the plugin's engine, engine/gh.py, from Bash. A draft
+// opened or put back is the engine's to label, as it does for the tool.
+function engineAct(call: EngineCall): Act | undefined {
+  const repo = call.repo ? repoOf(call.repo) ?? call.repo : undefined
+  const number = /^#?\d+$/.test(call.positionals[0] ?? '') ? Number(call.positionals[0].replace('#', '')) : undefined
+  const rest = number !== undefined ? call.positionals.slice(1) : call.positionals
+  const at = (kind: ActKind, extra: Partial<Act> = {}): Act => ({
+    kind, name: 'gh.py ' + call.command, ...(repo ? { repo } : {}), ...(number !== undefined ? { pr: number } : { unreadable: true }), ...extra,
+  })
+  const sha = engineOption(call, '--sha')
+  if (call.command === 'pr-merge') return at('merge', sha ? { sha } : {})
+  if (call.command === 'pr-ready') return at('undraft', { forCi: engineFlag(call, '--for-ci') })
+  if (call.command === 'pr-readiness' && rest.some((word) => word.toLowerCase() === READY)) return at('ready-label')
+  if (call.command === 'label-add' && namesReady(rest)) return at('ready-label')
+  if (call.command === 'pr-create' && !engineFlag(call, '--draft')) return { kind: 'create', name: 'gh.py pr-create', ...(repo ? { repo } : {}) }
+  return undefined
+}
+
 // Every act of a Bash command line, read word by word: a message or a body
-// that only mentions one is an argument, not a command.
+// that only mentions one is an argument, not a command. A request the engine
+// reads from stdin (`gh.py --stdin-json`) is no act the line shows.
 export function bashActs(line: string): Act[] {
   const found: Act[] = []
   for (const argv of simpleCommands(line)) {
-    if (!GH.test(argv[0] ?? '')) continue
-    const act = argv[1] === 'api' ? apiAct(argv) : prAct(argv)
+    const engine = engineCall(argv)
+    const act = engine ? engineAct(engine) : !GH.test(argv[0] ?? '') ? undefined : argv[1] === 'api' ? apiAct(argv) : prAct(argv)
     if (act) found.push(act)
   }
   return found
@@ -390,8 +424,14 @@ export function draftRefusal(act: string): string {
   return 'github: ' + act + ' refused: open it as a draft, then leave draft once ready.'
 }
 
+export function unreadablePrRefusal(act: string): string {
+  return 'github: ' + act + ' refused: the pull request number cannot be read from the command.'
+    + ' Write it as a number, or run the tool\'s mcp__github__gh call with {"pr": <n>}.'
+}
+
 export function unnamedRepoRefusal(act: string): string {
-  return 'github: ' + act + ' refused: name the repository with -R owner/name.'
+  const option = act.startsWith('gh.py ') ? '--repo' : '-R'
+  return 'github: ' + act + ' refused: name the repository with ' + option + ' owner/name.'
 }
 
 // A GraphQL mutation names a node, not a repository and a number.
@@ -401,8 +441,14 @@ export function graphqlRefusal(kind: ActKind): string {
     + ' mcp__github__gh ' + tool + ' {"pr": <n>} on <owner/name>: it checks that the pull request is ready.'
 }
 
-export function autoMergeRefusal(kind: ActKind, repo: string, pr?: number): string {
-  const command = kind === 'merge' ? 'gh pr merge' : 'gh pr ready'
+// name: the command as the refusal names it, by default the gh command of that kind.
+export function autoMergeRefusal(kind: ActKind, repo: string, pr?: number, name?: string): string {
+  if (kind === 'create') {
+    return 'github: ' + (name ?? 'gh pr create') + ' refused on ' + repo + ': this repository is not in auto-merge,'
+      + ' so opening a pull request out of draft needs the operator\'s explicit word. Open it with --draft, or when'
+      + ' he gave it, run mcp__github__gh pr-create {"draft": false} on ' + repo + ': it asks him in the conversation.'
+  }
+  const command = name ?? (kind === 'merge' ? 'gh pr merge' : 'gh pr ready')
   const tool = kind === 'merge' ? 'pr-merge' : 'pr-ready'
   return 'github: ' + command + ' refused on ' + repo + ': this repository is not in auto-merge, so a merge or'
     + ' leaving draft needs the operator\'s explicit word. When he gave it, run mcp__github__gh ' + tool

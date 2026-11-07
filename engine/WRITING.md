@@ -9,12 +9,17 @@ review comments.
 Conventional Commits in every repository: `<type>[(<scope>)]: <description>`. Write in
 the imperative mood ("add", not "added" or "adds"). Add a body only when the why is not
 obvious from the diff itself. No trailer of any kind: no `Co-Authored-By`, no
-`Claude-Session`, no attribution of any form, no semicolon. No reference to a plan
+`Claude-Session`, no attribution of any form, no semicolon. A trailer is a line that
+opens with a `<word>-by:` label (`Co-Authored-By`, `Signed-off-by`, `Reviewed-by`, and
+`Drive-by` or `Stand-by` as well), `Claude-Session:` or `Change-Id:`, and the plugin
+refuses it in a description and a review comment. Other labelled lines (`Note:`,
+`Follow-up work:`) are none. No reference to a plan
 `phase`, an `agent`, an `AI`, an `orchestrator`, a `session`, a `brief` or any other
 workflow mechanics in any durable artifact (code, comment, doc, commit, PR) — the
-history must read as a developer's own work, in business and technical terms only. No
-information specific to GeoNative in a public repository (code, commit, title,
-description).
+history must read as a developer's own work, in business and technical terms only. In
+the Claude plugins themselves, the `claude-*` repositories, these words name the
+plugin's object and are allowed. No information specific to GeoNative in a public
+repository (code, commit, title, description).
 
 Types: `feat`, `fix`, `chore`, `refactor`, `style`, `docs`, `test`, `perf`, `build`,
 `ci`. Examples: `feat(scraper): create TvShow nfo file`, `chore: add json5 dependency`,
@@ -37,11 +42,12 @@ Right: `test(device-server): fix flaky listen tests`
 ## References to pull requests and issues
 
 Name a pull request or an issue with its repository, always: `infra#195`,
-`geonative-api#1778`. Never a bare `#195`, never « PR #15 », and every item of a list
+`api#1778`. Never a bare `#195`, never « PR #15 », and every item of a list
 carries its prefix, even in a table whose column names the repository. One number
 exists in several repositories and a bare one can send a merge or a review to the
 wrong PR. Only the formats GitHub resolves inside its own repository keep `(#N)`: a
-squashed commit title, a PR body.
+squashed commit title, a PR body, where a `PRs Dependency` or `Related PRs` item is the
+pull request's full URL.
 
 ## Pull request descriptions
 
@@ -115,13 +121,14 @@ PR strictly before the other (an API PR strictly before an infra PR, or the reve
 the TODOs say that order explicitly. `**Related PRs:**` lists the PRs truly linked to
 this work: part of the same batch, the origin of the bug, or a link of that strength,
 never a distant link. A follow-up PR, one that must come after this one, is never listed
-in Related PRs. State what ships first. `PRs Dependency` lists PRs that ship before,
-and two PRs never depend on each other. English always, with no
+in Related PRs. State what ships first. `PRs Dependency` lists PRs that ship before it
+or with it, and two PRs never depend on each other. English always, with no
 semicolon. No workflow vocabulary. Every PR is opened as a draft (`pr-create
 --draft`, the house default), and leaves draft only once it is ready (see « Ready
 pull requests »). Outside
-auto-merge, leaving draft and merging also need the operator's explicit word, given
-through this tool, which asks him in the conversation. In a
+auto-merge, leaving draft (a CI undraft aside, see « Ready pull requests ») and merging
+also need the operator's explicit word, given through this tool, which asks him in the
+conversation. In a
 repository in auto-merge, the merge, leaving draft and the deployment its method
 foresees need no approval of the operator once the pull request is ready. A repository
 enters or leaves auto-merge only through `auto-merge-set`, on the operator's words quoted
@@ -133,8 +140,9 @@ A colleague's PR and any review comment are proposed first.
 A paragraph stating the ship order is always added to a description, without asking:
 add, re-read, report in one line. It names no pull request, it points to the sections
 (« Ships after the PRs in PRs Dependency », « Ships in any order with the Related
-PRs »), and every (#N) goes in `PRs Dependency` or `Related PRs`. Every (#N) written in
-those sections comes from PR #N's own files and body, never by eye. A TODO goes only on the PR that enables its
+PRs »), and every pull request goes in `PRs Dependency` or `Related PRs` as its full
+URL. Every URL written in those sections comes from that pull request's own files and
+body, never by eye. A TODO goes only on the PR that enables its
 step: it runs when that PR ships.
 
 A pull request that changes an interface carries screenshots of what it changes,
@@ -164,7 +172,7 @@ passed, its end-to-end tests ran there and passed (or the operator waived them i
 own words, dated), and every CI check is green there. Ready belongs to one head: a new
 commit makes the pull request not ready until the four hold again at the new head.
 
-The `Ready` and `Not Ready` labels carry that fact on GitHub. A draft carries `Not
+The `Ready` and `Not Ready` labels carry that fact on GitHub. A draft opens with `Not
 Ready`. `Ready` is put only when the four hold, and leaving draft or merging needs the
 same four. When the CI does not run on a draft, the pull request leaves draft for it,
 still `Not Ready`, and goes back to draft once the CI is green, then takes `Ready`.

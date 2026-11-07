@@ -44,32 +44,45 @@ def _pr_merge_status(obj):
     return "open" if item.get("state") == "open" else "closed"
 
 
+def gate_ci(statuses, runs, draft):
+    """CI at one head, as the ready guard reads it. A completed check passes
+    on success, and on neutral out of draft. A skipped one, and on a draft a
+    neutral one, did not prove anything: not green. Any other conclusion is a
+    failure, named by its check. A check still running is not green. No check
+    at all is green."""
+    commit_statuses = (statuses or {}).get("statuses") or []
+    passing = ("success",) if draft else ("success", "neutral")
+    unproven = ("skipped", "neutral") if draft else ("skipped",)
+    completed = [run for run in runs if run.get("status") == "completed"]
+    failed = [
+        run.get("name", "?") for run in completed if run.get("conclusion") not in passing + unproven
+    ] + [status.get("context", "?") for status in commit_statuses if status.get("state") in ("failure", "error")]
+    running = [run for run in runs if run.get("status") != "completed"] + [
+        status for status in commit_statuses if status.get("state") == "pending"
+    ]
+    skipped = [run.get("name", "?") for run in completed if run.get("conclusion") in unproven]
+    if failed:
+        result = "FAILURE"
+    elif running or skipped:
+        result = "PENDING"
+    else:
+        result = "SUCCESS"
+    return {
+        "result": result,
+        "failed": failed,
+        "running": len(running),
+        "skipped": skipped,
+        "total": len(runs) + len(commit_statuses),
+    }
+
+
 def _checks_status(obj):
     # "statuses" is the combined-status API's own response: {"state": ...,
     # "statuses": [{"state": ..., "context": ...}, ...]}. Its inner list is
     # what legacy commit statuses (as opposed to check runs) actually live in.
-    check_runs = obj.get("check_runs", [])
-    commit_statuses = (obj.get("statuses") or {}).get("statuses") or []
-
-    failed = [
-        run.get("name", "?")
-        for run in check_runs
-        if run.get("conclusion") in ("failure", "timed_out", "cancelled")
-    ] + [
-        status.get("context", "?")
-        for status in commit_statuses
-        if status.get("state") in ("failure", "error")
-    ]
-    pending = [run for run in check_runs if run.get("status") != "completed"] + [
-        status for status in commit_statuses if status.get("state") == "pending"
-    ]
-    if failed:
-        result = "FAILURE"
-    elif pending:
-        result = "PENDING"
-    else:
-        result = "SUCCESS"
-    return json.dumps({"result": result, "failed_checks": failed}, sort_keys=True)
+    # The verdict is the ready guard's, the one pr-gate reads.
+    ci = gate_ci(obj.get("statuses"), obj.get("check_runs", []), bool(obj.get("draft")))
+    return json.dumps({"result": ci["result"], "failed_checks": ci["failed"]}, sort_keys=True)
 
 
 def _threads(obj, resolved):

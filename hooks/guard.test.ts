@@ -400,6 +400,44 @@ for (const phase of ['warn', 'enforce'] as const) {
   }
 }
 
+// A Bash merge outside auto-merge is refused on the list alone, before any
+// readiness read, so a guard that would throw on the read changes nothing. An undraft
+// reads the readiness first, as a CI undraft passes outside auto-merge: when that read
+// throws, the guard's failure handler refuses it on the list, in both phases.
+for (const phase of ['warn', 'enforce'] as const) {
+  test(phase + ': a Bash merge outside auto-merge is refused on the list before any readiness read', async ($, on) => {
+    await inPhase(phase, async () => {
+      const seen = await world($, on, { gate: BROKEN_GATE, autoMerge: ['acme/other'] })
+      const out: any = await $.tool.call(bash('gh pr merge 12 -R acme/thing --squash'))
+      expect(out.deny).toContain('github: gh pr merge refused on acme/thing: this repository is not in auto-merge')
+      expect(seen.bash.length).toBe(0)
+      expect(commands(seen)).toEqual([])
+    })
+  })
+
+  test(phase + ': a Bash undraft outside auto-merge whose guard throws is refused on the list', async ($, on) => {
+    await inPhase(phase, async () => {
+      const seen = await world($, on, { gate: BROKEN_GATE, autoMerge: ['acme/other'] })
+      const out: any = await $.tool.call(bash('gh pr ready 12 -R acme/thing'))
+      expect(String(out.deny)).toContain('github: gh pr ready refused on acme/thing: this repository is not in auto-merge')
+      expect(seen.bash.length).toBe(0)
+      expect(seen.logs).toEqual([])
+    })
+  })
+
+  test(phase + ': a Bash pull request opened out of draft outside auto-merge is refused whatever the readiness read gives', async ($, on) => {
+    await inPhase(phase, async () => {
+      const seen = await world($, on, { gate: BROKEN_GATE, autoMerge: ['acme/other'] })
+      const out: any = await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
+      expect(String(out.deny)).toContain(phase === 'enforce'
+        ? 'github: gh pr create refused: open it as a draft'
+        : 'github: gh pr create refused on acme/thing: this repository is not in auto-merge')
+      expect(seen.bash.length).toBe(0)
+      expect(commands(seen)).toEqual([])
+    })
+  })
+}
+
 // ---- leaving draft for CI ----
 
 for (const phase of ['warn', 'enforce'] as const) {
@@ -628,6 +666,15 @@ test('the Ready label needs the four on a draft as out of draft', async ($, on) 
   })
 })
 
+test('the Ready label on a draft needs the four too', async ($, on) => {
+  await inPhase('enforce', async () => {
+    const seen = await world($, on, { records: {} })
+    const draft: any = await $.tool.call(gh('pr-readiness', { pr: 12, state: 'ready' }))
+    expect(draft.deny).toContain('not ready')
+    expect(commands(seen)).toEqual(['pr-gate'])
+  })
+})
+
 test('a Bash merge of the current branch\'s pull request reads it with pr-get', async ($, on) => {
   const seen = await world($, on, { autoMerge: ['acme/thing'], pulls: { '': [{ number: 12 }] } })
   await $.tool.call(bash('gh pr merge -R acme/thing'))
@@ -650,14 +697,198 @@ test('a Bash Ready label is the ready guard\'s in every repository', async ($, o
   })
 })
 
-test('a Bash pull request opened out of draft warns, then is refused under enforce', async ($, on) => {
+test('a Bash pull request opened out of draft is refused outside auto-merge in both phases', async ($, on) => {
   const seen = await world($, on)
-  await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
+  const warned: any = await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
+  expect(warned.deny).toBe('github: gh pr create refused on acme/thing: this repository is not in auto-merge, so opening'
+    + ' a pull request out of draft needs the operator\'s explicit word. Open it with --draft, or when he gave it, run'
+    + ' mcp__github__gh pr-create {"draft": false} on acme/thing: it asks him in the conversation.')
+  expect(seen.bash.length).toBe(0)
+  await inPhase('enforce', async () => {
+    const out: any = await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
+    expect(out.deny).toBe('github: gh pr create refused: open it as a draft, then leave draft once ready.')
+  })
+})
+
+test('a Bash gh pr create --draft=false is refused outside auto-merge, like one with no --draft', async ($, on) => {
+  const seen = await world($, on)
+  const body = '"Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"'
+  for (const flag of ['--draft=false', '--draft=0']) {
+    const out: any = await $.tool.call(bash('gh pr create -R acme/thing ' + flag + ' -t "fix: x" -b ' + body))
+    expect(out.deny, flag).toContain('github: gh pr create refused on acme/thing: this repository is not in auto-merge')
+  }
+  expect(seen.bash.length).toBe(0)
+  for (const flag of ['--draft=true', '--draft']) {
+    const out: any = await $.tool.call(bash('gh pr create -R acme/thing ' + flag + ' -t "fix: x" -b ' + body))
+    expect(out.deny, flag).toBeUndefined()
+  }
+})
+
+test('a Bash pull request opened out of draft in auto-merge warns, then is refused under enforce', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/thing'] })
+  await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b "Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"'))
+  expect(seen.bash.length).toBe(1)
   expect(seen.logs[0]).toContain('opened out of draft')
   await inPhase('enforce', async () => {
     const out: any = await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b body'))
     expect(out.deny).toBe('github: gh pr create refused: open it as a draft, then leave draft once ready.')
   })
+})
+
+test('a Bash pull request opened out of draft with no repository named is refused under warn', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/thing'] })
+  const out: any = await $.tool.call(bash('gh pr create -t "fix: x" -b body'))
+  expect(out.deny).toBe('github: gh pr create refused: name the repository with -R owner/name.')
+  expect(seen.bash.length).toBe(0)
+})
+
+// The engine run through Bash, as the github-curl skill runs it.
+const ENGINE = 'python3 /plugins/github/engine/gh.py'
+
+test('a Bash merge through gh.py is refused outside auto-merge, as gh pr merge is', async ($, on) => {
+  const seen = await world($, on)
+  const out: any = await $.tool.call(bash(ENGINE + ' pr-merge 12 --repo acme/thing --method squash'))
+  expect(out.deny).toBe('github: gh.py pr-merge refused on acme/thing: this repository is not in auto-merge, so a merge or'
+    + ' leaving draft needs the operator\'s explicit word. When he gave it, run mcp__github__gh pr-merge {"pr": 12} on'
+    + ' acme/thing: it checks that the pull request is ready, then asks him in the conversation.')
+  expect(seen.bash.length).toBe(0)
+})
+
+test('a Bash merge through gh.py in auto-merge meets the ready guard', async ($, on) => {
+  const seen = await world($, on, { ...NO_RECORDS, autoMerge: ['acme/thing'] })
+  await $.tool.call(bash(ENGINE + ' --repo=acme/thing pr-merge 12'))
+  expect(seen.bash.length).toBe(1)
+  expect(seen.logs[0]).toContain('github: gh.py pr-merge on acme/thing#12 is not ready')
+  await inPhase('enforce', async () => {
+    const out: any = await $.tool.call(bash('/plugins/github/engine/gh.py pr-merge 12 --repo acme/thing'))
+    expect(out.deny).toContain('github: gh.py pr-merge refused on acme/thing#12 at 0123456: not ready.')
+  })
+})
+
+test('a Bash merge or undraft through gh.py with no --repo is refused under warn', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/thing'] })
+  for (const command of [ENGINE + ' pr-merge 12', ENGINE + ' pr-ready 12']) {
+    const out: any = await $.tool.call(bash(command))
+    expect(out.deny, command).toBe('github: gh.py ' + command.split(' ')[2] + ' refused: name the repository with --repo owner/name.')
+  }
+  expect(seen.bash.length).toBe(0)
+})
+
+test('a Bash undraft through gh.py passes for CI with --for-ci only', async ($, on) => {
+  const seen = await world($, on, { ...NO_RECORDS, ci: { result: 'PENDING', skipped: ['test'] } })
+  const forCi: any = await $.tool.call(bash(ENGINE + ' pr-ready 12 --for-ci --repo acme/thing'))
+  expect(forCi.deny).toBeUndefined()
+  expect(seen.logs).toEqual(['github: acme/thing#12 out of draft to run CI, still Not Ready'])
+  const ready: any = await $.tool.call(bash(ENGINE + ' pr-ready 12 --repo acme/thing'))
+  expect(ready.deny).toContain('github: gh.py pr-ready refused on acme/thing: this repository is not in auto-merge')
+  expect(seen.bash.length).toBe(1)
+})
+
+test('a Bash pr-create through gh.py without --draft is refused outside auto-merge, with --draft it passes', async ($, on) => {
+  const seen = await world($, on)
+  const out: any = await $.tool.call(bash(ENGINE + ' pr-create --repo acme/thing --title "fix: x"'))
+  expect(out.deny).toBe('github: gh.py pr-create refused on acme/thing: this repository is not in auto-merge, so opening'
+    + ' a pull request out of draft needs the operator\'s explicit word. Open it with --draft, or when he gave it, run'
+    + ' mcp__github__gh pr-create {"draft": false} on acme/thing: it asks him in the conversation.')
+  expect(seen.bash.length).toBe(0)
+  const draft: any = await $.tool.call(bash(ENGINE + ' pr-create --repo acme/thing --title "fix: x" --draft'))
+  expect(draft.deny).toBeUndefined()
+  expect(seen.bash.length).toBe(1)
+})
+
+test('a Bash merge through gh.py with a global --repo or python -W before the script is read as a merge', async ($, on) => {
+  const seen = await world($, on)
+  for (const command of [
+    'python3 "$GH" --repo acme/thing pr-merge 12',
+    'python3 "$GH" -R acme/thing pr-merge 12',
+    'python3 -W ignore /plugins/github/engine/gh.py pr-merge 12 --repo acme/thing',
+  ]) {
+    const out: any = await $.tool.call(bash(command))
+    expect(out.deny, command).toContain('github: gh.py pr-merge refused on acme/thing: this repository is not in auto-merge')
+  }
+  expect(seen.bash.length).toBe(0)
+})
+
+test('a Bash gh.py act whose pull request number cannot be read is refused in both phases, never read against the current branch', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/thing'], pulls: { '': [{ number: 12 }] } })
+  for (const command of [
+    ENGINE + ' pr-merge {} --repo acme/thing',
+    ENGINE + ' pr-merge "$PR" --repo acme/thing',
+    ENGINE + ' pr-ready {} --repo acme/thing',
+    ENGINE + ' pr-readiness {} ready --repo acme/thing',
+  ]) {
+    const out: any = await $.tool.call(bash(command))
+    expect(out.deny, command).toBe('github: gh.py ' + command.split(' ')[2] + ' refused: the pull request number cannot be read from the command.'
+      + ' Write it as a number, or run the tool\'s mcp__github__gh call with {"pr": <n>}.')
+    await inPhase('enforce', async () => {
+      const again: any = await $.tool.call(bash(command))
+      expect(again.deny, command).toContain('the pull request number cannot be read from the command')
+    })
+  }
+  expect(seen.bash.length).toBe(0)
+  expect(commands(seen)).toEqual([])
+})
+
+test('a Bash Ready label through gh.py needs the four under enforce', async ($, on) => {
+  await inPhase('enforce', async () => {
+    const seen = await world($, on, NO_RECORDS)
+    for (const command of [ENGINE + ' pr-readiness 12 ready --repo acme/thing', ENGINE + ' label-add 12 bug Ready --repo acme/thing']) {
+      const out: any = await $.tool.call(bash(command))
+      expect(out.deny, command).toContain('refused on acme/thing#12 at 0123456: not ready.')
+    }
+    expect(seen.bash.length).toBe(0)
+  })
+})
+
+test('a Bash undraft through gh.py for CI passes in auto-merge too, still Not Ready', async ($, on) => {
+  const seen = await world($, on, { ...NO_RECORDS, autoMerge: ['acme/thing'], ci: { result: 'PENDING', skipped: ['test'] } })
+  const out: any = await $.tool.call(bash(ENGINE + ' pr-ready 12 --for-ci --repo acme/thing'))
+  expect(out.deny).toBeUndefined()
+  expect(seen.bash.length).toBe(1)
+  expect(seen.logs).toEqual(['github: acme/thing#12 out of draft to run CI, still Not Ready'])
+})
+
+test('a Bash Ready label through gh.py that is not ready goes on with a warn line under warn', async ($, on) => {
+  const seen = await world($, on, NO_RECORDS)
+  for (const command of [ENGINE + ' pr-readiness 12 ready --repo acme/thing', ENGINE + ' label-add 12 Ready --repo acme/thing']) {
+    const out: any = await $.tool.call(bash(command))
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(seen.bash.length).toBe(2)
+  expect(seen.logs.length).toBe(2)
+  expect(seen.logs[0]).toContain('github: gh.py pr-readiness on acme/thing#12 is not ready')
+  expect(seen.logs[1]).toContain('github: gh.py label-add on acme/thing#12 is not ready')
+})
+
+test('a text quoting a gh.py act passes with nothing read', async ($, on) => {
+  const seen = await world($, on)
+  for (const line of [
+    'echo "python3 engine/gh.py pr-merge 12 --repo acme/thing"',
+    'cat <<EOF\npython3 engine/gh.py pr-merge 12 --repo acme/thing\nEOF',
+    'git commit -m "fix: stop running python3 engine/gh.py pr-merge 12 twice"',
+  ]) {
+    const out: any = await $.tool.call(bash(line))
+    expect(out.deny, line).toBeUndefined()
+  }
+  expect(seen.runs).toEqual([])
+})
+
+test('gh.py reads that act on nothing, and a --stdin-json request, pass the ready guard unread', async ($, on) => {
+  const seen = await world($, on)
+  await $.tool.call(bash(ENGINE + ' pr-get --format pr-number'))
+  await $.tool.call(bash(ENGINE + ' pr-readiness 12 not-ready --repo acme/thing'))
+  await $.tool.call(bash('printf %s \'{"command":"pr-merge","args":{"pr":12}}\' | ' + ENGINE + ' --stdin-json'))
+  expect(seen.bash.length).toBe(3)
+  expect(commands(seen)).toEqual([])
+})
+
+test('a --stdin-json word among other engine words does not hide the Ready label act', async ($, on) => {
+  const seen = await world($, on, NO_RECORDS)
+  const out: any = await $.tool.call(bash(ENGINE + ' --repo acme/thing label-add 12 Ready -- --stdin-json'))
+  expect(out.deny).toBeUndefined()
+  expect(seen.bash.length).toBe(1)
+  expect(seen.logs.length).toBe(1)
+  expect(seen.logs[0]).toContain('github: gh.py label-add on acme/thing#12 is not ready')
 })
 
 test('a Bash draft opened gets Not Ready from the URL gh printed', async ($, on) => {

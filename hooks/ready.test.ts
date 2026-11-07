@@ -136,6 +136,13 @@ test('the Bash merges, undrafts and Ready labels are recognised with their repos
   expect(bashActs('gh pr ready 3 -R o/r --undo')).toEqual([{ kind: 'redraft', name: 'gh pr ready', repo: 'o/r', pr: 3 }])
 })
 
+test('gh pr create --draft=false and --draft=0 open a pull request out of draft, --draft=true and a bare --draft a draft', () => {
+  expect(bashActs('gh pr create --draft=false -t t')).toEqual([{ kind: 'create', name: 'gh pr create' }])
+  expect(bashActs('gh pr create --draft=0 -t t -R o/r')).toEqual([{ kind: 'create', name: 'gh pr create', repo: 'o/r' }])
+  expect(bashActs('gh pr create --draft=true -t t')).toEqual([{ kind: 'create-draft', name: 'gh pr create' }])
+  expect(bashActs('gh pr create --draft -t t')).toEqual([{ kind: 'create-draft', name: 'gh pr create' }])
+})
+
 test('what only looks like an act is none', () => {
   for (const line of [
     'gh pr merge 12 -R o/r --disable-auto',
@@ -149,6 +156,18 @@ test('what only looks like an act is none', () => {
     'gh api graphql -f query=\'query{viewer{login}}\'',
     'gh pr view 12',
     'cat <<EOF\ngh pr merge 1\nEOF',
+  ]) {
+    expect(bashActs(line), line).toEqual([])
+  }
+})
+
+test('a text quoting a gh.py act is no act', () => {
+  for (const line of [
+    'echo "python3 engine/gh.py pr-merge 12 --repo o/r"',
+    'cat <<EOF\npython3 engine/gh.py pr-merge 12 --repo o/r\nEOF',
+    'git commit -m "stop running python3 engine/gh.py pr-merge 12 twice"',
+    'gh pr comment 3 -b "run python3 engine/gh.py pr-ready 12 --repo o/r later"',
+    'printf %s "python3 engine/gh.py label-add 12 Ready" > note.txt',
   ]) {
     expect(bashActs(line), line).toEqual([])
   }

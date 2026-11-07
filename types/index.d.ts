@@ -7,8 +7,9 @@ export type GithubPaneRow = {
   draft: boolean
   // null when the PR was not looked up in detail, or the lookup failed.
   comments: number | null
-  // SUCCESS, FAILURE or PENDING from checks-status; "?" when the checks could
-  // not be read, "–" past the PRs looked up in detail.
+  // SUCCESS, FAILURE or PENDING from checks-status, the ready guard's CI
+  // verdict; "?" when the checks could not be read, "–" past the PRs looked
+  // up in detail.
   ci: string
   // The failed checks' names, when ci is FAILURE.
   failed: string[]
