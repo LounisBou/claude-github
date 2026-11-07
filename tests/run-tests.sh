@@ -792,6 +792,8 @@ for line in open('$F3/sent.jsonl'):
 : > "$F3/sent.jsonl"
 check_status "pr-merge refuses a short sha" 1 gh3 pr-merge 7 --sha abc123
 check_status "pr-merge refuses a 64-character sha" 1 gh3 pr-merge 7 --sha "$(printf 'a%.0s' {1..64})"
+check_status "pr-merge refuses a sha with a trailing newline" 1 gh3 pr-merge 7 --sha "$HEAD_SHA
+"
 check "a refused sha sends no request" "0" "$(wc -l < "$F3/sent.jsonl" | tr -d ' ')"
 
 # A PR that GitHub counts as part of a stack refuses the synchronous endpoint
@@ -1913,8 +1915,15 @@ check "pr-gate reads a check that failed to start as failed" "FAILURE build  2" 
 
 gate8 checks-draft "$(printf '%s' "$PULL8" | sed 's/"draft":false/"draft":true/')" '{"statuses":[]}' '{"check_runs":[]}'
 printf '%s' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}' > "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_check-runs.json"
+cp "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_check-runs.json" "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_check-runs__per_page=100.json"
 check "pr-checks reads a neutral check on a draft as pr-gate does" "PENDING" \
   "$(gh8 pr-checks 12 --format checks-status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"])')"
+
+gate8 checks-page "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"test","status":"completed","conclusion":"success"}]}'
+gh8 pr-checks 12 >/dev/null
+check "pr-checks reads the check runs a full page, as pr-gate does" \
+  "GET /repos/acme/thing/pulls/12|GET /repos/acme/thing/commits/$GATEHEAD/status|GET /repos/acme/thing/commits/$GATEHEAD/check-runs?per_page=100" \
+  "$(python3 -c 'import json,sys; print("|".join(json.loads(l)["method"] + " " + json.loads(l)["path"] for l in open(sys.argv[1])))' "$F8/sent.jsonl")"
 
 gate8 merged "$(printf '%s' "$PULL8" | sed 's/"state":"open"/"state":"closed","merged_at":"2026-11-01T00:00:00Z"/')" '{"statuses":[]}' '{"check_runs":[]}'
 check "pr-gate says merged for a merged pull request" "merged" \
