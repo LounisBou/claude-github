@@ -35,9 +35,17 @@ function ghWords(argv: string[]): { noun: string; verb: string; flags: string[] 
 
 // The engine subcommands that write a text WRITING.md governs, as gh pr create,
 // comment and edit do: a pr-update writes one only through its title or its body.
+// A review and a comment subcommand writes one through the file that holds it.
+const FILE_TEXT_COMMANDS = new Set([
+  'review-submit', 'thread-reply', 'comment-edit', 'review-pending-create', 'review-pending-add',
+])
 function engineAuthoring(call: EngineCall): string | undefined {
   const name = 'gh.py ' + call.command
   if (call.command === 'pr-create' || call.command === 'pr-comment') return name
+  if (FILE_TEXT_COMMANDS.has(call.command)) {
+    const file = call.opts.some(([flag]) => flag === '--body-file' || flag === '--comments-file')
+    return file ? name : undefined
+  }
   const text = call.opts.some(([flag]) => flag === '--title' || flag === '--body' || flag === '--body-file')
   return call.command === 'pr-update' && text ? name : undefined
 }

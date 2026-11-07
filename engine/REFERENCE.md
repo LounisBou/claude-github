@@ -371,9 +371,10 @@ the engine names its repository with `--repo`. Elsewhere it is refused in both p
 github: <gh pr merge | gh pr ready> refused on <owner/name>: this repository is not in auto-merge, so a merge or leaving draft needs the operator's explicit word. When he gave it, run mcp__github__gh <pr-merge | pr-ready> {"pr": <n>} on <owner/name>: it checks that the pull request is ready, then asks him in the conversation.
 ```
 
-The engine run from Bash keeps the writing rules too: `pr-create`, `pr-comment` and a
-`pr-update` with a title or a body wait for `WRITING.md` to be read, as `gh pr create`,
-`gh pr comment` and `gh pr edit` do, and the `--title` of `pr-create` and `pr-update`, and the
+The engine run from Bash keeps the writing rules too: `pr-create`, `pr-comment`, a
+`pr-update` with a title or a body, and `review-submit`, `thread-reply`, `comment-edit`,
+`review-pending-create` and `review-pending-add` with a body file or a comments file wait for
+`WRITING.md` to be read, as `gh pr create`, `gh pr comment` and `gh pr edit` do, and the `--title` of `pr-create` and `pr-update`, and the
 file a `--body-file` names, are linted as the tool's call would be. An engine act whose
 pull request number cannot be read from the command (`pr-merge {}` fed by an `xargs`,
 `pr-merge "$PR"`) is refused in both phases, never read against the current branch's pull
