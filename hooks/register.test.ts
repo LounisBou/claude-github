@@ -619,6 +619,24 @@ test('every trailer is refused, Signed-off-by included', () => {
   expect(lint('pr-comment', { pr: 1, body: 'Note: the cache is cold.\nFollow-up work: the index.' })).toEqual([])
 })
 
+test('a trailer is a line opening with a <word>-by label, so Stand-by: is one, a mid-line one is not', () => {
+  const rule = 'body: no trailer of any kind, such as Co-Authored-By, Signed-off-by or Claude-Session'
+  for (const trailer of ['Stand-by: waiting for the CI', 'Drive-by: renamed a variable']) {
+    expect(rulesOf('pr-comment', { pr: 1, body: 'Looks right.\n\n' + trailer }), trailer).toEqual([rule])
+  }
+  expect(lint('pr-comment', { pr: 1, body: 'We stand-by: no, we ship.' })).toEqual([])
+  expect(lint('pr-comment', { pr: 1, body: 'Stand by: the CI is running.' })).toEqual([])
+})
+
+test('a loose list under Related PRs, its items split by a blank line, is text after the sections', () => {
+  const rule = 'body: nothing after the four sections, a description ends with Related PRs'
+  const head = 'Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:**\n'
+  const tight = head + '- https://github.com/acme/front/pull/1620\n- https://github.com/acme/front/pull/1621'
+  const loose = head + '- https://github.com/acme/front/pull/1620\n\n- https://github.com/acme/front/pull/1621'
+  expect(lint('pr-create', { title: 't', body: tight })).toEqual([])
+  expect(rulesOf('pr-create', { title: 't', body: loose })).toEqual([rule])
+})
+
 test('a description ends with the four sections, any text after them is refused', () => {
   const rule = 'body: nothing after the four sections, a description ends with Related PRs'
   expect(rulesOf('pr-create', { title: 't', body: 'Adds the reset.\n\n' + NONE + '\n\nThanks for the review.' })).toEqual([rule])
@@ -2454,6 +2472,34 @@ test('a body file under ~ is read from HOME, a relative one after a cd is left t
   const out: any = await $.tool.call({ tool: 'Bash', command: moved })
   expect(out.deny).toBeUndefined()
   expect(bash).toEqual([moved])
+})
+
+test('the engine route leaves a body from stdin, an expanded variable and a relative file after a cd to the person', async ($, on) => {
+  const bash: string[] = []
+  const bad = 'Adds the reset; at last.\n\n' + NONE
+  on('env.get', (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
+  await stubBashLint($, on, bash, [], 'Deny', { '/home/me/b.md': bad, '/work/b.md': bad, '/tmp/b.md': bad })
+
+  const lines = [
+    'python3 engine/gh.py pr-create --draft --title "feat: x" --body-file - < /tmp/b.md',
+    'python3 engine/gh.py pr-create --draft --title "feat: x" --body-file "$BODY"',
+    'python3 engine/gh.py pr-update 3 --body-file ${BODY}',
+    'cd sub && python3 engine/gh.py pr-create --draft --title "feat: x" --body-file b.md',
+  ]
+  for (const command of lines) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(bash).toEqual(lines)
+  // The same file named where the hook can read it is linted.
+  for (const command of [
+    'python3 engine/gh.py pr-create --draft --title "feat: x" --body-file ~/b.md',
+    'cd sub && python3 engine/gh.py pr-create --draft --title "feat: x" --body-file /tmp/b.md',
+    'python3 engine/gh.py pr-create --draft --title "feat: x" --body-file b.md',
+  ]) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toContain('- body: no semicolon in prose')
+  }
 })
 
 test('a body file the hook cannot read lets the command through, with one log line', async ($, on) => {
