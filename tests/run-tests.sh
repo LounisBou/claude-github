@@ -296,6 +296,9 @@ check "checks-status never reads a skipped check as green" "PENDING" \
 check "checks-status names a check that failed to start" "FAILURE build" \
   "$(render checks-status '{"check_runs":[{"name":"build","status":"completed","conclusion":"startup_failure"}],"statuses":{"statuses":[]}}' \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["result"], ",".join(d["failed_checks"]))')"
+check "checks-status reads a neutral check outside draft as green" "SUCCESS" \
+  "$(render checks-status '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}],"statuses":{"statuses":[]}}' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"])')"
 check "open-threads keeps only unresolved" "1" \
   "$(render open-threads '[{"id":"a","isResolved":false},{"id":"b","isResolved":true}]' | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 check "resolve-status" "resolved" "$(render resolve-status '{"resolveReviewThread":{"thread":{"isResolved":true}}}')"
@@ -1924,6 +1927,10 @@ gh8 pr-checks 12 >/dev/null
 check "pr-checks reads the check runs a full page, as pr-gate does" \
   "GET /repos/acme/thing/pulls/12|GET /repos/acme/thing/commits/$GATEHEAD/status|GET /repos/acme/thing/commits/$GATEHEAD/check-runs?per_page=100" \
   "$(python3 -c 'import json,sys; print("|".join(json.loads(l)["method"] + " " + json.loads(l)["path"] for l in open(sys.argv[1])))' "$F8/sent.jsonl")"
+
+gate8 checks-neutral "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}'
+check "pr-checks reads a neutral check out of draft as pr-gate does" "SUCCESS" \
+  "$(gh8 pr-checks 12 --format checks-status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"])')"
 
 gate8 merged "$(printf '%s' "$PULL8" | sed 's/"state":"open"/"state":"closed","merged_at":"2026-11-01T00:00:00Z"/')" '{"statuses":[]}' '{"check_runs":[]}'
 check "pr-gate says merged for a merged pull request" "merged" \
