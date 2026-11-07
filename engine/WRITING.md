@@ -93,8 +93,9 @@ plugin refuses, through its tool and through the shell alike, in the summary, th
 "unchanged", "no dependency", "does not", "doesn't", "is not changed", "left untouched",
 "no other pull request", "without conflict". The summary names no pull request: no
 `#N`, no `repo#N`, no `owner/repo#N`, no pull request URL above the sections, as links
-go in `PRs Dependency` or `Related PRs`, a closing keyword such as `Fixes #12` excepted. No horizontal rule (`---`, `***`, `___`) and no bold
-label line other than the four sections, anywhere in the description.
+go in `PRs Dependency` or `Related PRs`, a closing keyword such as `Fixes #12` excepted. No horizontal rule (`---`, `***`, `___`)
+other than the `---` between two screenshots, and no bold label line (`**Label:**`)
+other than the four sections, anywhere in the description.
 The four sections come after the summary text, in that order, each in that exact shape
 whatever the number of items: the bold label alone on its line, then one item per line,
 nothing else on the line, or the label and `none` on one line when the section is
@@ -138,10 +139,15 @@ step: it runs when that PR ships.
 
 A pull request that changes an interface carries screenshots of what it changes,
 desktop AND mobile on a project with a mobile version. They sit above the four
-sections: each image (`![…](…)` or an `<img>` tag) on its line, with a plain caption
-line under it (`Desktop`, `Mobile`), never a bold label. Every image is audited before
-the PR is Ready, and a PR without both is not ready. When a visual is fixed after the
-merge, retake the screenshots and replace them on GitHub and Notion.
+sections. Each screenshot is its descriptive title in bold, alone on its line: the
+screen, the state shown, the screen size, and before or after when there is a pair
+(`**Devices list, desktop 1440 px, after**`), with no colon at its end, which would
+read as a section label. Its image, `![…](…)` or an `<img>` tag, is on the next line.
+Two screenshots in a row are separated by a `---` line with a blank line before it, so
+the line above never turns into a heading: the block `image-upload --title` writes.
+Every image is audited before the PR is Ready, and a PR without both is not ready. When
+a visual is fixed after the merge, retake the screenshots and replace them on GitHub
+and Notion.
 
 A pull request carries no change its purpose does not need: no reformatting, no
 renaming, no unrelated file. A refactor needed for the change to be clean and
