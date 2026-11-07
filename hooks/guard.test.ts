@@ -746,6 +746,18 @@ test('a Bash undraft through gh.py passes for CI with --for-ci only', async ($, 
   expect(seen.bash.length).toBe(1)
 })
 
+test('a Bash pr-create through gh.py without --draft is refused outside auto-merge, with --draft it passes', async ($, on) => {
+  const seen = await world($, on)
+  const out: any = await $.tool.call(bash(ENGINE + ' pr-create --repo acme/thing --title "fix: x"'))
+  expect(out.deny).toBe('github: gh.py pr-create refused on acme/thing: this repository is not in auto-merge, so opening'
+    + ' a pull request out of draft needs the operator\'s explicit word. Open it with --draft, or when he gave it, run'
+    + ' mcp__github__gh pr-create {"draft": false} on acme/thing: it asks him in the conversation.')
+  expect(seen.bash.length).toBe(0)
+  const draft: any = await $.tool.call(bash(ENGINE + ' pr-create --repo acme/thing --title "fix: x" --draft'))
+  expect(draft.deny).toBeUndefined()
+  expect(seen.bash.length).toBe(1)
+})
+
 test('a Bash Ready label through gh.py needs the four under enforce', async ($, on) => {
   await inPhase('enforce', async () => {
     const seen = await world($, on, NO_RECORDS)
