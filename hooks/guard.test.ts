@@ -771,6 +771,26 @@ test('a Bash merge through gh.py with a global --repo or python -W before the sc
   expect(seen.bash.length).toBe(0)
 })
 
+test('a Bash gh.py act whose pull request number cannot be read is refused in both phases, never read against the current branch', async ($, on) => {
+  const seen = await world($, on, { autoMerge: ['acme/thing'], pulls: { '': [{ number: 12 }] } })
+  for (const command of [
+    ENGINE + ' pr-merge {} --repo acme/thing',
+    ENGINE + ' pr-merge "$PR" --repo acme/thing',
+    ENGINE + ' pr-ready {} --repo acme/thing',
+    ENGINE + ' pr-readiness {} ready --repo acme/thing',
+  ]) {
+    const out: any = await $.tool.call(bash(command))
+    expect(out.deny, command).toBe('github: gh.py ' + command.split(' ')[2] + ' refused: the pull request number cannot be read from the command.'
+      + ' Write it as a number, or run the tool\'s mcp__github__gh call with {"pr": <n>}.')
+    await inPhase('enforce', async () => {
+      const again: any = await $.tool.call(bash(command))
+      expect(again.deny, command).toContain('the pull request number cannot be read from the command')
+    })
+  }
+  expect(seen.bash.length).toBe(0)
+  expect(commands(seen)).toEqual([])
+})
+
 test('a Bash Ready label through gh.py needs the four under enforce', async ($, on) => {
   await inPhase('enforce', async () => {
     const seen = await world($, on, NO_RECORDS)
