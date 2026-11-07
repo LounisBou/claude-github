@@ -4,7 +4,7 @@
 // the session, keeps the marks and answers the calls.
 
 import { carriesText, textFields } from './writing.ts'
-import { type EngineCall, engineOption, engineStart, engineWords, gitSubcommand, simpleCommands } from './shell.ts'
+import { type EngineCall, engineCall, engineOption, engineStart, engineWords, gitSubcommand, simpleCommands } from './shell.ts'
 
 // The file every author reads, under the plugin's root.
 export const WRITING_FILE = '/engine/WRITING.md'
@@ -33,11 +33,22 @@ function ghWords(argv: string[]): { noun: string; verb: string; flags: string[] 
   return named.length === 2 ? { noun: named[0], verb: named[1], flags: argv.slice(k) } : undefined
 }
 
+// The engine subcommands that write a text WRITING.md governs, as gh pr create,
+// comment and edit do: a pr-update writes one only through its title or its body.
+function engineAuthoring(call: EngineCall): string | undefined {
+  const name = 'gh.py ' + call.command
+  if (call.command === 'pr-create' || call.command === 'pr-comment') return name
+  const text = call.opts.some(([flag]) => flag === '--title' || flag === '--body' || flag === '--body-file')
+  return call.command === 'pr-update' && text ? name : undefined
+}
+
 // The authoring command one simple command runs, as the refusal names it, or
 // undefined when it writes no text WRITING.md governs.
 export function authoringCommand(argv: string[]): string | undefined {
   const git = gitSubcommand(argv)
   if (git && argv[git.at] === 'commit') return 'git commit'
+  const engine = engineCall(argv)
+  if (engine) return engineAuthoring(engine)
   const gh = /^(.*\/)?gh$/.test(argv[0] ?? '') ? ghWords(argv) : undefined
   if (!gh || (gh.noun !== 'pr' && gh.noun !== 'issue')) return undefined
   const { noun, verb, flags } = gh
