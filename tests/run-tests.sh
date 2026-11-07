@@ -653,6 +653,12 @@ check_status "a title over 100 characters exits 1" 1 \
   gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..101})"
 check "a descriptive title of 66 characters is kept" "Export dialog, open with a month of invoices, mobile 390 px, after" \
   "$(gh3 image-upload "$WORK/shot.png" --title "Export dialog, open with a month of invoices, mobile 390 px, after" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title"))')"
+check "asterisks and closing brackets are taken out of a title" \
+  "**Login screen [v2**
+![Login screen [v2](https://github.com/acme/thing/blob/pr-assets/$SHA.png?raw=true)" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "**Login** screen [v2]" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin)["markdown"])')"
+check_status "a title made only of asterisks exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "**"
+check_status "a title ending with a colon once its asterisks are out exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "Login screen:**"
 check_status "a title ending with a colon exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "Login screen:"
 check_status "an empty title after trim exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "   "
 

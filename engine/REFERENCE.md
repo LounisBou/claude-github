@@ -212,7 +212,8 @@ deliberately not used: it would mean whole-account credentials on disk.
 
 `--title T` puts the screenshot's descriptive title above its image, as a bold line
 followed by the image with the title as alt text (`WRITING.md` « Pull request
-descriptions »): one line, trimmed, 100 characters or fewer, with no colon at its end:
+descriptions »): one line, trimmed, 100 characters or fewer, with no colon at its end. Asterisks and
+closing brackets are taken out of it, as they would break the bold line or the alt text:
 
 ```
 python3 "$GH" image-upload screenshot.png --title "Login screen"

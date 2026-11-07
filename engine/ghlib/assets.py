@@ -13,12 +13,15 @@ from . import errors, http, repo
 
 MAX_TITLE_LENGTH = 100
 BLOCK_SEPARATOR = "\n\n---\n\n"
+# Characters that would break the bold line or the image's alt text the description
+# lint reads: they are taken out of a title rather than refused.
+TITLE_STRIPPED = str.maketrans("", "", "*]")
 
 
 def _clean_title(title):
     if title is None:
         return None
-    stripped = title.strip()
+    stripped = title.strip().translate(TITLE_STRIPPED).strip()
     if not stripped or "\n" in stripped:
         raise errors.UsageError("image title must be one line")
     if len(stripped) > MAX_TITLE_LENGTH:

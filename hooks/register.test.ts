@@ -843,6 +843,12 @@ test('the block image-upload writes for two titled files is part of a descriptio
   expect(lint('pr-create', { title: 't', body: 'Adds the reset button.\n\n' + block + '\n\n' + NONE })).toEqual([])
 })
 
+test('the block image-upload writes for a title that carried asterisks and brackets is part of a description', () => {
+  const block = '**Login screen [v2**\n![Login screen [v2](https://github.com/acme/thing/blob/pr-assets/a.png?raw=true)\n\n---\n\n'
+    + '**Second**\n![Second](https://github.com/acme/thing/blob/pr-assets/b.png?raw=true)'
+  expect(lint('pr-create', { title: 't', body: 'Adds the reset button.\n\n' + block + '\n\n' + NONE })).toEqual([])
+})
+
 test('a rule anywhere but between two titled screenshots is refused, and the refusal names the exception', () => {
   const summary = 'Adds the last alert column.\n\n'
   for (const [name, body] of [
