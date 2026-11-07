@@ -1912,6 +1912,30 @@ test('every authoring gh command is refused unread', async ($, on) => {
   expect(bash).toEqual([])
 })
 
+test('the engine\'s authoring subcommands run through Bash are refused unread, the others pass', async ($, on) => {
+  const bash: string[] = []
+  await stubGuard($, on, [], bash)
+
+  const cases: [string, string][] = [
+    ['python3 engine/gh.py pr-create --title t --draft', 'gh.py pr-create'],
+    ['python3 /x/engine/gh.py pr-update 3 --body-file /x', 'gh.py pr-update'],
+    ['python3 /x/engine/gh.py pr-update 3 --title t', 'gh.py pr-update'],
+    ['python3 /x/engine/gh.py pr-comment 3 --body-file /x --repo o/r', 'gh.py pr-comment'],
+    ['python3 "$GH" --repo o/r pr-comment 3 --body-file /x', 'gh.py pr-comment'],
+  ]
+  for (const [command, named] of cases) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(JSON.stringify(out), command).toContain('before ' + named + ':')
+  }
+  expect(bash).toEqual([])
+  const passes = ['python3 engine/gh.py pr-get', 'python3 engine/gh.py pr-update 3 --base main', 'python3 engine/gh.py pr-checks 3']
+  for (const command of passes) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(bash).toEqual(passes)
+})
+
 test('gh\'s repository option before the noun or the verb is read through', async ($, on) => {
   const bash: string[] = []
   await stubGuard($, on, [], bash)
