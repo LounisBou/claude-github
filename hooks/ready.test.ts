@@ -136,6 +136,13 @@ test('the Bash merges, undrafts and Ready labels are recognised with their repos
   expect(bashActs('gh pr ready 3 -R o/r --undo')).toEqual([{ kind: 'redraft', name: 'gh pr ready', repo: 'o/r', pr: 3 }])
 })
 
+test('gh pr create --draft=false and --draft=0 open a pull request out of draft, --draft=true and a bare --draft a draft', () => {
+  expect(bashActs('gh pr create --draft=false -t t')).toEqual([{ kind: 'create', name: 'gh pr create' }])
+  expect(bashActs('gh pr create --draft=0 -t t -R o/r')).toEqual([{ kind: 'create', name: 'gh pr create', repo: 'o/r' }])
+  expect(bashActs('gh pr create --draft=true -t t')).toEqual([{ kind: 'create-draft', name: 'gh pr create' }])
+  expect(bashActs('gh pr create --draft -t t')).toEqual([{ kind: 'create-draft', name: 'gh pr create' }])
+})
+
 test('what only looks like an act is none', () => {
   for (const line of [
     'gh pr merge 12 -R o/r --disable-auto',
