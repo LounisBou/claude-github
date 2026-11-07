@@ -110,6 +110,15 @@ function has(parsed: Parsed, ...flags: string[]): boolean {
   return parsed.opts.some(([flag]) => flags.includes(flag))
 }
 
+// A boolean flag as gh reads it: bare or `=true` is set, `=false`, `=f` or `=0` is not,
+// and the last occurrence wins.
+function flagSet(parsed: Parsed, ...flags: string[]): boolean {
+  const given = parsed.opts.filter(([flag]) => flags.includes(flag))
+  if (given.length === 0) return false
+  const value = given[given.length - 1][1]
+  return value === undefined || !/^(false|f|0)$/i.test(value)
+}
+
 function values(parsed: Parsed, ...flags: string[]): string[] {
   return parsed.opts.filter(([flag, value]) => flags.includes(flag) && value !== undefined).map(([, value]) => value as string)
 }
@@ -165,7 +174,7 @@ function prAct(argv: string[]): Act | undefined {
   }
   if (verb === 'create') {
     // A pull request opened with the Ready label is opened as ready.
-    const draft = has(parsed, '-d', '--draft') && !namesReady(values(parsed, '-l', '--label'))
+    const draft = flagSet(parsed, '-d', '--draft') && !namesReady(values(parsed, '-l', '--label'))
     return { ...base, kind: draft ? 'create-draft' : 'create' }
   }
   return undefined

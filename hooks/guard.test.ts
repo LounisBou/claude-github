@@ -672,6 +672,20 @@ test('a Bash pull request opened out of draft is refused outside auto-merge in b
   })
 })
 
+test('a Bash gh pr create --draft=false is refused outside auto-merge, like one with no --draft', async ($, on) => {
+  const seen = await world($, on)
+  const body = '"Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"'
+  for (const flag of ['--draft=false', '--draft=0']) {
+    const out: any = await $.tool.call(bash('gh pr create -R acme/thing ' + flag + ' -t "fix: x" -b ' + body))
+    expect(out.deny, flag).toContain('github: gh pr create refused on acme/thing: this repository is not in auto-merge')
+  }
+  expect(seen.bash.length).toBe(0)
+  for (const flag of ['--draft=true', '--draft']) {
+    const out: any = await $.tool.call(bash('gh pr create -R acme/thing ' + flag + ' -t "fix: x" -b ' + body))
+    expect(out.deny, flag).toBeUndefined()
+  }
+})
+
 test('a Bash pull request opened out of draft in auto-merge warns, then is refused under enforce', async ($, on) => {
   const seen = await world($, on, { autoMerge: ['acme/thing'] })
   await $.tool.call(bash('gh pr create -R acme/thing -t "fix: x" -b "Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"'))
