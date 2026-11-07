@@ -867,6 +867,22 @@ test('a rule anywhere but between two titled screenshots is refused, and the ref
   expect(refused.map((v) => v.rule).join('\n')).toContain('a `---` is kept only between two screenshots, a blank line before it')
 })
 
+test('a `---` is refused when a screenshot beside it has a title ending with a colon, a detached title or no image', () => {
+  const summary = 'Adds the last alert column.\n\n'
+  const url = 'https://github.com/user-attachments/assets/1.png'
+  for (const [name, body] of [
+    ['title ending with a colon above the rule', summary + '**Devices list, desktop:**\n![Devices list](' + url + ')\n\n---\n\n' + MOBILE_SHOT + '\n\n' + NONE],
+    ['title ending with a space and a colon above the rule', summary + '**Devices list, desktop :**\n![Devices list](' + url + ')\n\n---\n\n' + MOBILE_SHOT + '\n\n' + NONE],
+    ['title ending with a colon below the rule', summary + DESKTOP_SHOT + '\n\n---\n\n**Devices list, mobile:**\n![Devices list](' + url + ')\n\n' + NONE],
+    ['title not adjacent to its image above the rule', summary + '**Devices list, desktop**\n\n![Devices list](' + url + ')\n\n---\n\n' + MOBILE_SHOT + '\n\n' + NONE],
+    ['title not adjacent to its image below the rule', summary + DESKTOP_SHOT + '\n\n---\n\n**Devices list, mobile**\n\n![Devices list](' + url + ')\n\n' + NONE],
+    ['title with no image above the rule', summary + '**Devices list, desktop**\n\n---\n\n' + MOBILE_SHOT + '\n\n' + NONE],
+    ['title with no image below the rule', summary + DESKTOP_SHOT + '\n\n---\n\n**Devices list, mobile**\n\n' + NONE],
+  ]) {
+    expect(rulesOf('pr-create', { title: 't', body }), name).toContain(RULE_LINE)
+  }
+})
+
 test('a screenshot\'s bold title is read as the summary', () => {
   const body = 'Adds the last alert column.\n\n**Settings page unchanged, after**\n![settings](https://github.com/user-attachments/assets/1.png)\n\n' + NONE
   expect(rulesOf('pr-create', { title: 't', body })).toEqual(['body: state what the PR does, never what it does not do'])
