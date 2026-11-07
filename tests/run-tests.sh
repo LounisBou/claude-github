@@ -674,7 +674,55 @@ check_status "a title ending with a colon once its asterisks are out exits 1" 1 
 check "a title of exactly 100 characters is kept" "$(printf 'x%.0s' {1..100})" \
   "$(gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..100})" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title"))')"
 check_status "a title ending with a colon exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "Login screen:"
+for refused in "Login; logout" "Login screen #12" "Login screen acme/thing#12" "Login screen, see acme/thing#12" \
+  "Login screen unchanged" "Login screen, no dependency" "The list does not load" "The list doesn't load" \
+  "The list doesn’t load" "Login is not changed" "Login left untouched" "No other pull request" \
+  "Login without conflict" "UNCHANGED login" "Login https://github.com/acme/thing/pull/12"; do
+  check_status "a title the lint would refuse exits 1: $refused" 1 gh3 image-upload "$WORK/shot.png" --title "$refused"
+done
+check "a title made only of asterisks says it is empty, not that it spans lines" \
+  "error: image title is empty once its asterisks and closing brackets are taken out" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "**" 2>&1 >/dev/null | head -1)"
+check "a title with no refused phrase near its words is kept" "Undo changed items, no dependency-free build" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "Undo changed items, no dependency-free build" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title"))')"
+check "the engine's refused phrases are the lint's" \
+  "$(python3 -c '
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+body = re.search(r"NEGATIVE_PHRASES = \[(.*?)\]", text, re.S).group(1)
+print("\n".join(m[0] or m[1] for m in re.findall(r"\x27([^\x27]*)\x27|\"([^\"]*)\"", body)))
+' "$ROOT/hooks/writing.ts")" \
+  "$(PYTHONPATH="$ROOT/engine" python3 -c 'from ghlib import assets; print("\n".join(assets.NEGATIVE_PHRASES))')"
 check_status "an empty title after trim exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "   "
+
+# The block written for each surviving title passes the description lint (hooks/writing.ts,
+# read through bun, which the mod's own tests run under).
+if command -v bun >/dev/null 2>&1; then
+  blocks="$WORK/blocks.json"
+  F3="$F3" GHDIR="$GHDIR" python3 - "$WORK" > "$blocks" <<'PY'
+import json, os, subprocess, sys
+env = dict(os.environ, GH_FIXTURES=os.environ["F3"], GH_TOKEN="x", GH_REPO="acme/thing")
+out = []
+for title in ("Login screen", "**Login** screen [v2]", "Undo changed items, no dependency-free build",
+              "Devices list, desktop 1440 px, after", "Fish & chips <b>", "Price in $ and 100% done", "x" * 100):
+    run = subprocess.run(
+        ["python3", os.environ["GHDIR"] + "/gh.py", "image-upload", sys.argv[1] + "/shot.png", "--title", title, "--format", "raw"],
+        env=env, capture_output=True, text=True)
+    out.append(json.loads(run.stdout)["markdown"])
+print(json.dumps(out))
+PY
+  check "a block written for each surviving title passes the description lint" "7 blocks, 0 refused" \
+    "$(BLOCKS="$blocks" ROOT="$ROOT" bun -e '
+const { lint } = await import(process.env.ROOT + "/hooks/writing.ts")
+const blocks = JSON.parse(await Bun.file(process.env.BLOCKS).text())
+const none = "**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"
+let refused = 0
+for (const block of blocks) {
+  if (lint("pr-create", { title: "fix: x", body: "Adds the screenshots.\n\n" + block + "\n\n" + none }).length > 0) refused++
+}
+console.log(blocks.length + " blocks, " + refused + " refused")
+')"
+fi
 
 printf 'another capture' > "$WORK/second.png"
 SHA2=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$WORK/second.png")

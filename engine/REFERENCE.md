@@ -216,7 +216,11 @@ deliberately not used: it would mean whole-account credentials on disk.
 `--title T` puts the screenshot's descriptive title above its image, as a bold line
 followed by the image with the title as alt text (`WRITING.md` « Pull request
 descriptions »): one line, trimmed, 100 characters or fewer, with no colon at its end. Asterisks and
-closing brackets are taken out of it, as they would break the bold line or the alt text:
+closing brackets are taken out of it, as they would break the bold line or the alt text. A title
+the description rules would refuse is refused too, so the block always passes them: a semicolon,
+a `#N` or `repo#N` reference or a pull request URL, and the phrasings that say what a pull
+request does not do (`unchanged`, `does not`, `without conflict`…, the list of « Pull request
+descriptions »):
 
 ```
 python3 "$GH" image-upload screenshot.png --title "Login screen"
