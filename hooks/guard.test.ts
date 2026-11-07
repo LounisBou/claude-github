@@ -882,6 +882,15 @@ test('gh.py reads that act on nothing, and a --stdin-json request, pass the read
   expect(commands(seen)).toEqual([])
 })
 
+test('a --stdin-json word among other engine words does not hide the Ready label act', async ($, on) => {
+  const seen = await world($, on, NO_RECORDS)
+  const out: any = await $.tool.call(bash(ENGINE + ' --repo acme/thing label-add 12 Ready -- --stdin-json'))
+  expect(out.deny).toBeUndefined()
+  expect(seen.bash.length).toBe(1)
+  expect(seen.logs.length).toBe(1)
+  expect(seen.logs[0]).toContain('github: gh.py label-add on acme/thing#12 is not ready')
+})
+
 test('a Bash draft opened gets Not Ready from the URL gh printed', async ($, on) => {
   const seen = await world($, on, { bashResult: { result: { stdout: 'https://github.com/acme/thing/pull/31\n', stderr: '', interrupted: false } } })
   await $.tool.call(bash('gh pr create --draft -t "fix: x" -b "Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"'))
