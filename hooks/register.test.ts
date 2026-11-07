@@ -609,10 +609,41 @@ test('a TODO item that points to another or joins two actions is refused, two fu
   expect(lint('pr-create', { title: 't', body: 'Reads the file, then caches it, the same as before.\n\n**TODO Staging:** none\n**TODO Prod:**\n- [ ] Set `mode=then` in `app.env` on prod-01\n\n**PRs Dependency:** none\n**Related PRs:** none' })).toEqual([])
 })
 
-test('an attribution trailer is refused, Signed-off-by is not', () => {
+test('every trailer is refused, Signed-off-by included', () => {
   expect(rulesOf('pr-create', { title: 't', body: 'Text\n\nCo-Authored-By: someone <a@b.c>' })[0]).toContain('no trailer')
   expect(rulesOf('thread-reply', { thread_id: 'x', body: 'ok\nclaude-session: 123' })[0]).toContain('no trailer')
-  expect(lint('pr-create', { title: 't', body: 'Text\n\n' + NONE + '\n\nSigned-off-by: Dev <d@e.f>' })).toEqual([])
+  expect(rulesOf('pr-create', { title: 't', body: 'Text\n\n' + NONE + '\n\nSigned-off-by: Dev <d@e.f>' })).toContain('body: no trailer of any kind, such as Co-Authored-By, Signed-off-by or Claude-Session')
+  for (const trailer of ['Reviewed-by: Dev <d@e.f>', 'Acked-by: Dev <d@e.f>', 'Change-Id: I0123456789abcdef']) {
+    expect(rulesOf('pr-comment', { pr: 1, body: 'Looks right.\n\n' + trailer }), trailer).toEqual(['body: no trailer of any kind, such as Co-Authored-By, Signed-off-by or Claude-Session'])
+  }
+  expect(lint('pr-comment', { pr: 1, body: 'Note: the cache is cold.\nFollow-up work: the index.' })).toEqual([])
+})
+
+test('a trailer is a line opening with a <word>-by label, so Stand-by: is one, a mid-line one is not', () => {
+  const rule = 'body: no trailer of any kind, such as Co-Authored-By, Signed-off-by or Claude-Session'
+  for (const trailer of ['Stand-by: waiting for the CI', 'Drive-by: renamed a variable']) {
+    expect(rulesOf('pr-comment', { pr: 1, body: 'Looks right.\n\n' + trailer }), trailer).toEqual([rule])
+  }
+  expect(lint('pr-comment', { pr: 1, body: 'We stand-by: no, we ship.' })).toEqual([])
+  expect(lint('pr-comment', { pr: 1, body: 'Stand by: the CI is running.' })).toEqual([])
+})
+
+test('a loose list under Related PRs, its items split by a blank line, is text after the sections', () => {
+  const rule = 'body: nothing after the four sections, a description ends with Related PRs'
+  const head = 'Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:**\n'
+  const tight = head + '- https://github.com/acme/front/pull/1620\n- https://github.com/acme/front/pull/1621'
+  const loose = head + '- https://github.com/acme/front/pull/1620\n\n- https://github.com/acme/front/pull/1621'
+  expect(lint('pr-create', { title: 't', body: tight })).toEqual([])
+  expect(rulesOf('pr-create', { title: 't', body: loose })).toEqual([rule])
+})
+
+test('a description ends with the four sections, any text after them is refused', () => {
+  const rule = 'body: nothing after the four sections, a description ends with Related PRs'
+  expect(rulesOf('pr-create', { title: 't', body: 'Adds the reset.\n\n' + NONE + '\n\nThanks for the review.' })).toEqual([rule])
+  const listed = 'Adds the reset.\n\n**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:**\n- https://github.com/acme/front/pull/1620\n\nThanks.'
+  expect(rulesOf('pr-create', { title: 't', body: listed })).toEqual([rule])
+  expect(lint('pr-create', { title: 't', body: listed.replace('\n\nThanks.', '\n\n') })).toEqual([])
+  expect(rulesOf('pr-create', { title: 't', body: 'Adds the reset.\n\n' + NONE + '\n\n```\nnpm test\n```' })).toEqual([rule])
 })
 
 test('a title past the margin or on two lines is refused, one of about sixty passes', () => {
@@ -775,7 +806,7 @@ test('a colour, a link to an anchor and a version before a #N are no pull reques
   for (const summary of [
     'Ships after #12.',
     'Ships after #1234.',
-    'Ships after geo-git-flow#21.',
+    'Ships after git-flow#21.',
     'Ships after claude.github#21.',
     'Ships after LounisBou/claude-code#15.',
   ]) {
@@ -1014,6 +1045,34 @@ test('a pr-create out of draft and a pr-ready are asked even when a rule allows'
   expect(asked[1]).toContain('out of draft')
   expect(runs.length).toBe(2)
   expect(runs[0].args.draft).toBe(false)
+})
+
+test('a pr-merge is asked even when a rule allows, and Deny runs nothing', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  await startReading($)
+
+  const out: any = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-merge', args: { pr: 1 } })
+  expect(asked.length).toBe(1)
+  expect(asked[0]).toContain('Merge a pull request')
+  expect(JSON.stringify(out)).toContain('refused gh pr-merge')
+  expect(acts(runs).length).toBe(0)
+})
+
+test('a pr-merge on a repository in auto-merge is not asked under an allow rule', async ($, on) => {
+  const runs: any[] = []
+  const asked: string[] = []
+  await stubMod(on, runs, [], undefined, { decision: 'allow' })
+  stubAsk(on, asked, 'Deny')
+  stubAutoMerge(on, DATA, LISTED)
+  await startReading($)
+
+  const out = await $.tool.call({ tool: 'mcp__github__gh', command: 'pr-merge', args: { pr: 1 }, repo: 'acme/thing' })
+  expect(out).toEqual({ result: 'ok' })
+  expect(asked.length).toBe(0)
+  expect(acts(runs).length).toBe(1)
 })
 
 test('a title-only pr-update under an allow rule is not asked', async ($, on) => {
@@ -1871,6 +1930,60 @@ test('every authoring gh command is refused unread', async ($, on) => {
   expect(bash).toEqual([])
 })
 
+test('the engine\'s authoring subcommands run through Bash are refused unread, the others pass', async ($, on) => {
+  const bash: string[] = []
+  await stubGuard($, on, [], bash)
+
+  const cases: [string, string][] = [
+    ['python3 engine/gh.py pr-create --title t --draft', 'gh.py pr-create'],
+    ['python3 /x/engine/gh.py pr-update 3 --body-file /x', 'gh.py pr-update'],
+    ['python3 /x/engine/gh.py pr-update 3 --title t', 'gh.py pr-update'],
+    ['python3 /x/engine/gh.py pr-comment 3 --body-file /x --repo o/r', 'gh.py pr-comment'],
+    ['python3 "$GH" --repo o/r pr-comment 3 --body-file /x', 'gh.py pr-comment'],
+  ]
+  for (const [command, named] of cases) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(JSON.stringify(out), command).toContain('before ' + named + ':')
+  }
+  expect(bash).toEqual([])
+  const passes = ['python3 engine/gh.py pr-get', 'python3 engine/gh.py pr-update 3 --base main', 'python3 engine/gh.py pr-checks 3']
+  for (const command of passes) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(bash).toEqual(passes)
+})
+
+test('the engine\'s review and comment subcommands with a text file are refused unread, without one they pass', async ($, on) => {
+  const bash: string[] = []
+  await stubGuard($, on, [], bash)
+
+  const cases: [string, string][] = [
+    ['python3 engine/gh.py review-submit 3 --event COMMENT --body-file /x', 'gh.py review-submit'],
+    ['python3 engine/gh.py review-submit 3 --event COMMENT --comments-file /x', 'gh.py review-submit'],
+    ['python3 engine/gh.py thread-reply PRRT_x --body-file /x', 'gh.py thread-reply'],
+    ['python3 engine/gh.py comment-edit 99 --body-file /x', 'gh.py comment-edit'],
+    ['python3 engine/gh.py review-pending-create 3 --comments-file /x', 'gh.py review-pending-create'],
+    ['python3 engine/gh.py review-pending-add 3 --review-id 7 --path a.py --line 4 --body-file /x', 'gh.py review-pending-add'],
+  ]
+  for (const [command, named] of cases) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(JSON.stringify(out), command).toContain('before ' + named + ':')
+  }
+  expect(bash).toEqual([])
+  const passes = [
+    'python3 engine/gh.py review-submit 3 --event APPROVE',
+    'python3 engine/gh.py review-pending 3',
+    'python3 engine/gh.py comment-delete 99',
+    'python3 engine/gh.py thread-resolve PRRT_x',
+  ]
+  for (const command of passes) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(bash).toEqual(passes)
+})
+
 test('gh\'s repository option before the noun or the verb is read through', async ($, on) => {
   const bash: string[] = []
   await stubGuard($, on, [], bash)
@@ -2213,7 +2326,7 @@ test('a gh pr create whose body file breaks a rule is refused once, then sendabl
   const asked: string[] = []
   await stubBashLint($, on, bash, asked, 'Send as it is', { '/work/body.md': 'Adds the reset; at last.\n\n' + NONE })
 
-  const command = 'gh pr create --title "feat: add the reset" --body-file body.md'
+  const command = 'gh pr create --draft --title "feat: add the reset" --body-file body.md'
   const out: any = await $.tool.call({ tool: 'Bash', command })
   expect(out.deny).toContain('gh pr create refused, its text breaks the writing rules:\n- body: no semicolon in prose')
   expect(asked).toEqual([])
@@ -2224,6 +2337,26 @@ test('a gh pr create whose body file breaks a rule is refused once, then sendabl
   expect(asked[0]).toContain('no semicolon in prose')
   expect(asked[0]).toContain('Send it as it is?')
   expect(bash).toEqual([command])
+})
+
+test('a gh.py text run through Bash keeps the writing rules, its --body-file read', async ($, on) => {
+  const bash: string[] = []
+  const asked: string[] = []
+  await stubBashLint($, on, bash, asked, 'Deny', { '/work/body.md': 'Adds the reset; at last.\n\n' + NONE, '/work/ok.md': 'Adds the reset.\n\n' + NONE })
+
+  const create: any = await $.tool.call({ tool: 'Bash', command: 'python3 engine/gh.py pr-create --title "feat: add the reset" --body-file body.md --draft' })
+  expect(create.deny).toContain('gh pr-create refused, its text breaks the writing rules:\n- body: no semicolon in prose')
+  const update: any = await $.tool.call({ tool: 'Bash', command: 'python3 "$GH" pr-update 12 --body-file body.md' })
+  expect(update.deny).toContain('gh pr-update refused, its text breaks the writing rules:\n- body: no semicolon in prose')
+  const other: any = await $.tool.call({ tool: 'Bash', command: 'python3 "$SCRIPT" build --body-file body.md' })
+  expect(other.deny).toBeUndefined()
+  const comment: any = await $.tool.call({ tool: 'Bash', command: '/x/engine/gh.py pr-comment 12 --body-file=body.md --repo acme/thing' })
+  expect(comment.deny).toContain('gh pr-comment refused, its text breaks the writing rules:\n- body: no semicolon in prose')
+  const title: any = await $.tool.call({ tool: 'Bash', command: 'python3 engine/gh.py pr-update 12 --title "fix: a; b"' })
+  expect(title.deny).toContain('- title: no semicolon in prose')
+  const clean: any = await $.tool.call({ tool: 'Bash', command: 'python3 engine/gh.py pr-update 12 --body-file ok.md' })
+  expect(clean.deny).toBeUndefined()
+  expect(asked).toEqual([])
 })
 
 test('a gh pr edit whose -b body lacks the sections is refused once, then sendable as it is', async ($, on) => {
@@ -2291,8 +2424,8 @@ test('a body Bash cannot show, from stdin or a command substitution, is left to 
   await stubBashLint($, on, bash, [], 'Deny')
 
   const lines = [
-    'gh pr create --title "feat: x" --body-file - < /tmp/b.md',
-    'gh pr create --title "feat: x" --body "$(cat /tmp/b.md)"',
+    'gh pr create --draft --title "feat: x" --body-file - < /tmp/b.md',
+    'gh pr create --draft --title "feat: x" --body "$(cat /tmp/b.md)"',
     'gh pr edit 3 --body-file /missing.md',
   ]
   for (const command of lines) {
@@ -2307,7 +2440,7 @@ test('a title or body a shell variable or substitution gives is left to the pers
   await stubBashLint($, on, bash, [], 'Deny')
 
   const lines = [
-    'gh pr create --title "$TITLE" --body "$BODY"',
+    'gh pr create --draft --title "$TITLE" --body "$BODY"',
     'gh pr edit 3 --body "${BODY}"',
     'gh pr edit 3 -b $BODY',
     'gh pr comment 3 --body $\'Done; thanks\'',
@@ -2331,14 +2464,42 @@ test('a body file under ~ is read from HOME, a relative one after a cd is left t
   on('env.get', (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
   await stubBashLint($, on, bash, [], 'Deny', { '/home/me/b.md': bad, '/work/b.md': bad, '/tmp/b.md': bad })
 
-  const home: any = await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "feat: x" --body-file ~/b.md' })
+  const home: any = await $.tool.call({ tool: 'Bash', command: 'gh pr create --draft --title "feat: x" --body-file ~/b.md' })
   expect(home.deny).toContain('- body: no semicolon in prose')
-  const absolute: any = await $.tool.call({ tool: 'Bash', command: 'cd sub && gh pr create --title "feat: x" -F /tmp/b.md' })
+  const absolute: any = await $.tool.call({ tool: 'Bash', command: 'cd sub && gh pr create --draft --title "feat: x" -F /tmp/b.md' })
   expect(absolute.deny).toContain('- body: no semicolon in prose')
-  const moved = 'cd sub && gh pr create --title "feat: x" --body-file b.md'
+  const moved = 'cd sub && gh pr create --draft --title "feat: x" --body-file b.md'
   const out: any = await $.tool.call({ tool: 'Bash', command: moved })
   expect(out.deny).toBeUndefined()
   expect(bash).toEqual([moved])
+})
+
+test('the engine route leaves a body from stdin, an expanded variable and a relative file after a cd to the person', async ($, on) => {
+  const bash: string[] = []
+  const bad = 'Adds the reset; at last.\n\n' + NONE
+  on('env.get', (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
+  await stubBashLint($, on, bash, [], 'Deny', { '/home/me/b.md': bad, '/work/b.md': bad, '/tmp/b.md': bad })
+
+  const lines = [
+    'python3 engine/gh.py pr-create --draft --title "feat: x" --body-file - < /tmp/b.md',
+    'python3 engine/gh.py pr-create --draft --title "feat: x" --body-file "$BODY"',
+    'python3 engine/gh.py pr-update 3 --body-file ${BODY}',
+    'cd sub && python3 engine/gh.py pr-create --draft --title "feat: x" --body-file b.md',
+  ]
+  for (const command of lines) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(bash).toEqual(lines)
+  // The same file named where the hook can read it is linted.
+  for (const command of [
+    'python3 engine/gh.py pr-create --draft --title "feat: x" --body-file ~/b.md',
+    'cd sub && python3 engine/gh.py pr-create --draft --title "feat: x" --body-file /tmp/b.md',
+    'python3 engine/gh.py pr-create --draft --title "feat: x" --body-file b.md',
+  ]) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toContain('- body: no semicolon in prose')
+  }
 })
 
 test('a body file the hook cannot read lets the command through, with one log line', async ($, on) => {
@@ -2362,7 +2523,7 @@ test('a body in a heredoc substitution is read and linted', async ($, on) => {
   const bash: string[] = []
   await stubBashLint($, on, bash, [], 'Deny')
 
-  const bad = 'gh pr create --title "feat: x" --body "$(cat <<\'EOF\'\nAdds the reset; at last.\n\n' + NONE + '\nEOF\n)"'
+  const bad = 'gh pr create --draft --title "feat: x" --body "$(cat <<\'EOF\'\nAdds the reset; at last.\n\n' + NONE + '\nEOF\n)"'
   const out: any = await $.tool.call({ tool: 'Bash', command: bad })
   expect(out.deny).toContain('- body: no semicolon in prose')
   const good = bad.replace('; at last', '')

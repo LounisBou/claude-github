@@ -40,42 +40,49 @@ it. `/github:doctor` then confirms everything is ready.
   engine's `error:` line; exit codes 1–5 are documented in
   `engine/REFERENCE.md`. Calls follow the session's permission rules: a
   `deny` rule refuses, reads run unless a rule asks, and every write asks
-  first unless a rule or the permission mode allows it. The dialog offers
+  first unless a rule or the permission mode allows it, leaving draft and a
+  merge excepted (below). The dialog offers
   « Allow for this session », which covers that one command on that one
   repository until the session ends; it is never offered for `pr-merge` or
   `comment-delete`, nor where an explicit rule asks.
 - **Writing rules enforced** — before a title, a description or a comment
   leaves the machine, the mod checks the mechanical rules of
   `engine/WRITING.md`: no semicolon in prose (code spans, fenced blocks and
-  URLs are not prose), no `Co-Authored-By` or `Claude-Session` trailer, a
+  URLs are not prose), no trailer of any kind (`Co-Authored-By`,
+  `Signed-off-by`, `Claude-Session`, any `<word>-by`, `Change-Id`), a
   title on one line and within 72 characters, no heading in a PR description,
   every CVE id in a PR description a link to its advisory, and a security
   update's tables, one per advisory. A PR description ends with the four
   sections `TODO Staging`, `TODO Prod`, `PRs Dependency` and `Related PRs`, in
-  that order, `none` where empty, and carries no horizontal rule but the `---`
+  that order, `none` where empty, with nothing after them, and carries no horizontal rule but the `---`
   between two screenshots, no other bold label (a screenshot's bold title, with
   no colon at its end, is none), and in its summary no pull request reference and no negative phrasing
   from a fixed list. The same rules hold for `gh pr create`, `gh pr edit`,
-  `gh pr comment` and `gh pr review` run through Bash, their `--body-file` read.
+  `gh pr comment` and `gh pr review` run through Bash, their `--body-file` read,
+  and for the engine's own subcommands run there (`python3 engine/gh.py
+  pr-update 12 --body-file body.md`). A request the engine reads from stdin
+  (`--stdin-json`) is left unchecked.
   A `--body` read from stdin or made by a command substitution other than a
   `$(cat <<'EOF' … EOF)` heredoc is left unchecked, as the hook cannot see it.
   A text that breaks one is refused with the rule, so it can be rewritten. A
   text the user typed in the prompt passes, and the same text sent again is
   put to the user. `pr-create` opens a draft unless the call says otherwise,
-  and leaving draft (`draft: false`, `pr-ready`) is always asked, whatever
-  the rules allow, except in a repository in auto-merge (below). An existing
+  and leaving draft (`draft: false`, `pr-ready`) and a merge (`pr-merge`) are
+  always asked, whatever the rules allow, except in a repository in auto-merge
+  (below) and for a CI undraft (« Ready pull requests »). An existing
   description is replaced without asking, under the writing rules.
 - **Ready and Not Ready labels** — `pr-readiness <pr> ready|not-ready` puts
   the `Ready` (`27e760`) or `Not Ready` (`8c1455`) label on a pull request and
   takes the other off, and `labels-ensure` creates both on a repository that
   lacks them. `pr-create` labels the new pull request (`Not Ready` for a draft,
-  `Ready` otherwise) and `pr-ready` puts `Ready` on it, so the label says what
-  the draft flag says. A label failure never fails the command it follows.
+  `Ready` otherwise) and `pr-ready` puts `Ready` on it. A label failure never fails the command it follows.
 - **Auto-merge list** — `auto-merge-set` puts a repository in auto-merge or
   takes it out, on the operator's words quoted verbatim, and `auto-merge-list`
   prints the list (below).
 - **`/checks [pr]`** — combined CI status of a PR, with the failed checks
-  named, defaulting to the current branch's.
+  named, defaulting to the current branch's. It is the ready guard's verdict
+  (« Ready pull requests »): a skipped check, or a neutral one on a draft, is
+  `PENDING`, and the pane shows the same.
 - **`/threads [pr]`** — the open review threads of a PR, as a markdown table.
 - **`/prs`** — opens a pane listing every open PR: number, title and draft
   flag, plus CI state and comment count for the five newest, with a Refresh
@@ -120,8 +127,9 @@ says so in one transcript line.
 
 The list changes only through the tool, on the operator's word:
 `auto-merge-set {"repo": "owner/name", "on": true|false, "words": "<his words>"}`
-adds or removes a repository when `words` is found verbatim in a prompt he typed
-or in his answer recorded in the round, and `auto-merge-list` prints it. A Write,
+adds or removes a repository when `words` names auto-merge (« auto-merge », « auto
+merge » or « automerge ») and is found verbatim in a prompt he typed or in his answer
+recorded in the round, and `auto-merge-list` prints it. A Write,
 an Edit or a shell command on the file is refused. A prompt he types that speaks
 of auto-merge reminds the session to call `auto-merge-set`.
 
@@ -130,7 +138,7 @@ of auto-merge reminds the session to call `auto-merge-set`.
 A pull request is ready when four things hold at its current head commit: a
 clean review, a passed norms check, passed end-to-end tests (or a waiver the
 operator dated in his own words) and green CI. The `Ready` label, leaving
-draft and a merge need the four; a draft carries `Not Ready`, and a push to
+draft and a merge need the four; a draft opens with `Not Ready`, and a push to
 the branch puts `Not Ready` back. CI is read from GitHub: no check at all is
 green, a check that failed, still runs, was skipped, or is neutral on a draft
 is not. The other three are records, one small JSON file per run under
@@ -176,7 +184,9 @@ and the writing rules above still apply.
 (`gh pr merge --auto` included) need the four conditions above, through the tool
 (`pr-ready`, `pr-merge`, `pr-readiness ready`, `label-add Ready`) and through the
 shell (`gh pr ready`, `gh pr merge`, `gh pr edit` or `gh issue edit` with
-`--add-label Ready`, `gh api` on a pull request's merge or labels). Under enforce
+`--add-label Ready`, `gh api` on a pull request's merge or labels, and the
+engine's own subcommands, `python3 engine/gh.py pr-merge 12 --repo owner/name`).
+Under enforce
 the act is refused before anyone is asked, and a pull request still carrying
 `Ready` goes back to `Not Ready`:
 
@@ -186,7 +196,8 @@ github: <act> refused on <owner/name>#<n> at <head7>: not ready. Missing: <item>
 
 Under warn the act goes ahead with `github: <act> on <owner/name>#<n> is not
 ready, let through while the guard only warns. Missing: <item>`. A pull request
-opened out of draft is refused under enforce with `github: <act> refused: open it
+opened out of draft in the shell outside auto-merge is refused in both phases, as
+`gh pr ready` is, and anywhere under enforce with `github: <act> refused: open it
 as a draft, then leave draft once ready.`, and a readiness GitHub did not answer
 with `github: readiness of <owner/name>#<n> unverified: <error>`. Going back to
 draft always passes, and `gh pr create --draft` and `gh pr ready --undo` put

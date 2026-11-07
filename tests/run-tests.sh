@@ -287,6 +287,18 @@ check "checks-status folds a failing commit status into the verdict" "FAILURE" \
 check "checks-status names the failing legacy status" "ci/legacy" \
   "$(render checks-status '{"check_runs":[{"name":"build","status":"completed","conclusion":"success"}],"statuses":{"state":"failure","statuses":[{"state":"failure","context":"ci/legacy"}]}}' \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["failed_checks"][0])')"
+# checks-status gives the ready guard's verdict, the one pr-gate reads: a
+# skipped check proves nothing, and any conclusion but success, neutral or
+# skipped is a failure.
+check "checks-status never reads a skipped check as green" "PENDING" \
+  "$(render checks-status '{"check_runs":[{"name":"test","status":"completed","conclusion":"skipped"}],"statuses":{"statuses":[]}}' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"])')"
+check "checks-status names a check that failed to start" "FAILURE build" \
+  "$(render checks-status '{"check_runs":[{"name":"build","status":"completed","conclusion":"startup_failure"}],"statuses":{"statuses":[]}}' \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["result"], ",".join(d["failed_checks"]))')"
+check "checks-status reads a neutral check outside draft as green" "SUCCESS" \
+  "$(render checks-status '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}],"statuses":{"statuses":[]}}' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"])')"
 check "open-threads keeps only unresolved" "1" \
   "$(render open-threads '[{"id":"a","isResolved":false},{"id":"b","isResolved":true}]' | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
 check "resolve-status" "resolved" "$(render resolve-status '{"resolveReviewThread":{"thread":{"isResolved":true}}}')"
@@ -662,7 +674,55 @@ check_status "a title ending with a colon once its asterisks are out exits 1" 1 
 check "a title of exactly 100 characters is kept" "$(printf 'x%.0s' {1..100})" \
   "$(gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..100})" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title"))')"
 check_status "a title ending with a colon exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "Login screen:"
+for refused in "Login; logout" "Login screen #12" "Login screen acme/thing#12" "Login screen, see acme/thing#12" \
+  "Login screen unchanged" "Login screen, no dependency" "The list does not load" "The list doesn't load" \
+  "The list doesn’t load" "Login is not changed" "Login left untouched" "No other pull request" \
+  "Login without conflict" "UNCHANGED login" "Login https://github.com/acme/thing/pull/12"; do
+  check_status "a title the lint would refuse exits 1: $refused" 1 gh3 image-upload "$WORK/shot.png" --title "$refused"
+done
+check "a title made only of asterisks says it is empty, not that it spans lines" \
+  "error: image title is empty once its asterisks and closing brackets are taken out" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "**" 2>&1 >/dev/null | head -1)"
+check "a title with no refused phrase near its words is kept" "Undo changed items, no dependency-free build" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "Undo changed items, no dependency-free build" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title"))')"
+check "the engine's refused phrases are the lint's" \
+  "$(python3 -c '
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+body = re.search(r"NEGATIVE_PHRASES = \[(.*?)\]", text, re.S).group(1)
+print("\n".join(m[0] or m[1] for m in re.findall(r"\x27([^\x27]*)\x27|\"([^\"]*)\"", body)))
+' "$ROOT/hooks/writing.ts")" \
+  "$(PYTHONPATH="$ROOT/engine" python3 -c 'from ghlib import assets; print("\n".join(assets.NEGATIVE_PHRASES))')"
 check_status "an empty title after trim exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "   "
+
+# The block written for each surviving title passes the description lint (hooks/writing.ts,
+# read through bun, which the mod's own tests run under).
+if command -v bun >/dev/null 2>&1; then
+  blocks="$WORK/blocks.json"
+  F3="$F3" GHDIR="$GHDIR" python3 - "$WORK" > "$blocks" <<'PY'
+import json, os, subprocess, sys
+env = dict(os.environ, GH_FIXTURES=os.environ["F3"], GH_TOKEN="x", GH_REPO="acme/thing")
+out = []
+for title in ("Login screen", "**Login** screen [v2]", "Undo changed items, no dependency-free build",
+              "Devices list, desktop 1440 px, after", "Fish & chips <b>", "Price in $ and 100% done", "x" * 100):
+    run = subprocess.run(
+        ["python3", os.environ["GHDIR"] + "/gh.py", "image-upload", sys.argv[1] + "/shot.png", "--title", title, "--format", "raw"],
+        env=env, capture_output=True, text=True)
+    out.append(json.loads(run.stdout)["markdown"])
+print(json.dumps(out))
+PY
+  check "a block written for each surviving title passes the description lint" "7 blocks, 0 refused" \
+    "$(BLOCKS="$blocks" ROOT="$ROOT" bun -e '
+const { lint } = await import(process.env.ROOT + "/hooks/writing.ts")
+const blocks = JSON.parse(await Bun.file(process.env.BLOCKS).text())
+const none = "**TODO Staging:** none\n**TODO Prod:** none\n**PRs Dependency:** none\n**Related PRs:** none"
+let refused = 0
+for (const block of blocks) {
+  if (lint("pr-create", { title: "fix: x", body: "Adds the screenshots.\n\n" + block + "\n\n" + none }).length > 0) refused++
+}
+console.log(blocks.length + " blocks, " + refused + " refused")
+')"
+fi
 
 printf 'another capture' > "$WORK/second.png"
 SHA2=$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$WORK/second.png")
@@ -782,6 +842,9 @@ for line in open('$F3/sent.jsonl'):
 # reads as a race rather than as a typo: refuse it here, before any request.
 : > "$F3/sent.jsonl"
 check_status "pr-merge refuses a short sha" 1 gh3 pr-merge 7 --sha abc123
+check_status "pr-merge refuses a 64-character sha" 1 gh3 pr-merge 7 --sha "$(printf 'a%.0s' {1..64})"
+check_status "pr-merge refuses a sha with a trailing newline" 1 gh3 pr-merge 7 --sha "$HEAD_SHA
+"
 check "a refused sha sends no request" "0" "$(wc -l < "$F3/sent.jsonl" | tr -d ' ')"
 
 # A PR that GitHub counts as part of a stack refuses the synchronous endpoint
@@ -1092,9 +1155,9 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.13.1" \
+check "manifest version" "0.13.2" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.13.1 0.13.1" \
+check "marketplace version matches" "0.13.2 0.13.2" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
@@ -1901,6 +1964,22 @@ check "pr-gate never reads a neutral check on a draft as green" "PENDING  scan 1
 gate8 startup "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"build","status":"completed","conclusion":"startup_failure"},{"name":"lint","status":"completed","conclusion":"success"}]}'
 check "pr-gate reads a check that failed to start as failed" "FAILURE build  2" "$(ci8)"
 
+gate8 checks-draft "$(printf '%s' "$PULL8" | sed 's/"draft":false/"draft":true/')" '{"statuses":[]}' '{"check_runs":[]}'
+printf '%s' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}' > "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_check-runs.json"
+cp "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_check-runs.json" "$F8/GET_repos_acme_thing_commits_${GATEHEAD}_check-runs__per_page=100.json"
+check "pr-checks reads a neutral check on a draft as pr-gate does" "PENDING" \
+  "$(gh8 pr-checks 12 --format checks-status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"])')"
+
+gate8 checks-page "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"test","status":"completed","conclusion":"success"}]}'
+gh8 pr-checks 12 >/dev/null
+check "pr-checks reads the check runs a full page, as pr-gate does" \
+  "GET /repos/acme/thing/pulls/12|GET /repos/acme/thing/commits/$GATEHEAD/status|GET /repos/acme/thing/commits/$GATEHEAD/check-runs?per_page=100" \
+  "$(python3 -c 'import json,sys; print("|".join(json.loads(l)["method"] + " " + json.loads(l)["path"] for l in open(sys.argv[1])))' "$F8/sent.jsonl")"
+
+gate8 checks-neutral "$PULL8" '{"statuses":[]}' '{"check_runs":[{"name":"scan","status":"completed","conclusion":"neutral"}]}'
+check "pr-checks reads a neutral check out of draft as pr-gate does" "SUCCESS" \
+  "$(gh8 pr-checks 12 --format checks-status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"])')"
+
 gate8 merged "$(printf '%s' "$PULL8" | sed 's/"state":"open"/"state":"closed","merged_at":"2026-11-01T00:00:00Z"/')" '{"statuses":[]}' '{"check_runs":[]}'
 check "pr-gate says merged for a merged pull request" "merged" \
   "$(gh8 pr-gate 12 | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
@@ -1908,6 +1987,8 @@ gate8 unknown '{"__status":404,"message":"Not Found"}' '{}' '{}'
 check_status "pr-gate of an unknown pull request exits 4" 4 gh8 pr-gate 12
 gate8 nohead '{"number":12,"state":"open","head":{}}' '{}' '{}'
 check_status "pr-gate of a pull request with no head sha exits 3" 3 gh8 pr-gate 12
+gate8 sha-newline '{"number":12,"state":"open","head":{"sha":"'$GATEHEAD'\n"}}' '{"state":"success","statuses":[]}' '{"total_count":0,"check_runs":[]}'
+check_status "pr-gate of a head sha with a trailing newline exits 3" 3 gh8 pr-gate 12
 
 echo "== draft and back =="
 

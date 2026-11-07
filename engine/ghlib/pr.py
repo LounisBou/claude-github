@@ -8,7 +8,7 @@ import subprocess
 import time
 from urllib.parse import quote
 
-from . import bodies, errors, http, meta, repo
+from . import bodies, errors, fmt, http, meta, repo
 
 
 def _current_branch():
@@ -55,40 +55,8 @@ def pr_checks(args):
     pull = http.rest("GET", "/repos/%s/%s/pulls/%s" % (owner, name, args.pr))
     sha = (pull.get("head") or {}).get("sha", "")
     statuses = http.rest("GET", "/repos/%s/%s/commits/%s/status" % (owner, name, sha))
-    runs = http.rest("GET", "/repos/%s/%s/commits/%s/check-runs" % (owner, name, sha))
-    return {"statuses": statuses, "check_runs": runs.get("check_runs", [])}
-
-
-def _gate_ci(statuses, runs, draft):
-    """CI at one head, as the ready guard reads it. A completed check passes
-    on success, and on neutral out of draft. A skipped one, and on a draft a
-    neutral one, did not prove anything: not green. Any other conclusion is a
-    failure, named by its check. A check still running is not green. No check
-    at all is green."""
-    commit_statuses = (statuses or {}).get("statuses") or []
-    passing = ("success",) if draft else ("success", "neutral")
-    unproven = ("skipped", "neutral") if draft else ("skipped",)
-    completed = [run for run in runs if run.get("status") == "completed"]
-    failed = [
-        run.get("name", "?") for run in completed if run.get("conclusion") not in passing + unproven
-    ] + [status.get("context", "?") for status in commit_statuses if status.get("state") in ("failure", "error")]
-    running = [run for run in runs if run.get("status") != "completed"] + [
-        status for status in commit_statuses if status.get("state") == "pending"
-    ]
-    skipped = [run.get("name", "?") for run in completed if run.get("conclusion") in unproven]
-    if failed:
-        result = "FAILURE"
-    elif running or skipped:
-        result = "PENDING"
-    else:
-        result = "SUCCESS"
-    return {
-        "result": result,
-        "failed": failed,
-        "running": len(running),
-        "skipped": skipped,
-        "total": len(runs) + len(commit_statuses),
-    }
+    runs = http.rest("GET", "/repos/%s/%s/commits/%s/check-runs?per_page=100" % (owner, name, sha))
+    return {"statuses": statuses, "check_runs": runs.get("check_runs", []), "draft": bool(pull.get("draft"))}
 
 
 def pr_gate(args):
@@ -98,7 +66,7 @@ def pr_gate(args):
     except errors.NotFound:
         raise errors.NotFound("no pull request #%s in %s/%s" % (args.pr, owner, name))
     sha = (pull.get("head") or {}).get("sha") or ""
-    if not _FULL_SHA.match(sha):
+    if not _FULL_SHA.fullmatch(sha):
         raise errors.ApiError("pull request %s has no head sha" % args.pr)
     statuses = http.rest("GET", "/repos/%s/%s/commits/%s/status" % (owner, name, sha))
     runs = http.rest("GET", "/repos/%s/%s/commits/%s/check-runs?per_page=100" % (owner, name, sha))
@@ -110,7 +78,7 @@ def pr_gate(args):
         "draft": bool(pull.get("draft")),
         "head": sha.lower(),
         "labels": [label.get("name", "") for label in pull.get("labels") or []],
-        "ci": _gate_ci(statuses, (runs or {}).get("check_runs") or [], bool(pull.get("draft"))),
+        "ci": fmt.gate_ci(statuses, (runs or {}).get("check_runs") or [], bool(pull.get("draft"))),
     }
 
 
@@ -187,7 +155,9 @@ def pr_create(args):
 
 
 _MERGE_POLL = 3
-_FULL_SHA = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+_FULL_SHA = re.compile(r"[0-9a-fA-F]{40}")
+# What pr-merge --sha takes: exactly the 40 hex characters of a head, no trailing newline.
+_MERGE_SHA = re.compile(r"[0-9a-fA-F]{40}")
 
 
 def pr_merge(args):
@@ -196,7 +166,7 @@ def pr_merge(args):
     if args.sha:
         # A short or malformed sha would come back from GitHub as a moved head,
         # which reads as a race rather than as a typo.
-        if not _FULL_SHA.match(args.sha):
+        if not _MERGE_SHA.fullmatch(args.sha):
             raise errors.UsageError("--sha must be the full 40-character head sha")
         payload["sha"] = args.sha
     try:

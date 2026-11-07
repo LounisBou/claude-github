@@ -3,8 +3,8 @@
 // reader's context. Pure functions only: register.ts holds the $ that reads
 // the session, keeps the marks and answers the calls.
 
-import { textFields } from './writing.ts'
-import { gitSubcommand, simpleCommands } from './shell.ts'
+import { carriesText, textFields } from './writing.ts'
+import { type EngineCall, engineCall, engineOption, engineStart, engineWords, gitSubcommand, simpleCommands } from './shell.ts'
 
 // The file every author reads, under the plugin's root.
 export const WRITING_FILE = '/engine/WRITING.md'
@@ -33,11 +33,30 @@ function ghWords(argv: string[]): { noun: string; verb: string; flags: string[] 
   return named.length === 2 ? { noun: named[0], verb: named[1], flags: argv.slice(k) } : undefined
 }
 
+// The engine subcommands that write a text WRITING.md governs, as gh pr create,
+// comment and edit do: a pr-update writes one only through its title or its body.
+// A review and a comment subcommand writes one through the file that holds it.
+const FILE_TEXT_COMMANDS = new Set([
+  'review-submit', 'thread-reply', 'comment-edit', 'review-pending-create', 'review-pending-add',
+])
+function engineAuthoring(call: EngineCall): string | undefined {
+  const name = 'gh.py ' + call.command
+  if (call.command === 'pr-create' || call.command === 'pr-comment') return name
+  if (FILE_TEXT_COMMANDS.has(call.command)) {
+    const file = call.opts.some(([flag]) => flag === '--body-file' || flag === '--comments-file')
+    return file ? name : undefined
+  }
+  const text = call.opts.some(([flag]) => flag === '--title' || flag === '--body' || flag === '--body-file')
+  return call.command === 'pr-update' && text ? name : undefined
+}
+
 // The authoring command one simple command runs, as the refusal names it, or
 // undefined when it writes no text WRITING.md governs.
 export function authoringCommand(argv: string[]): string | undefined {
   const git = gitSubcommand(argv)
   if (git && argv[git.at] === 'commit') return 'git commit'
+  const engine = engineCall(argv)
+  if (engine) return engineAuthoring(engine)
   const gh = /^(.*\/)?gh$/.test(argv[0] ?? '') ? ghWords(argv) : undefined
   if (!gh || (gh.noun !== 'pr' && gh.noun !== 'issue')) return undefined
   const { noun, verb, flags } = gh
@@ -148,11 +167,30 @@ function markExpansions(line: string): string {
   return out
 }
 
+// The text a run of the plugin's engine, engine/gh.py, writes from Bash: its
+// subcommand's own rules, its --title and the file its --body-file names. The
+// engine reads every body from a file. A file from stdin or a shell variable,
+// and a relative one after a cd, are left out.
+function engineText(argv: string[], marked: string[] | undefined, moves: boolean): BashText | undefined {
+  const at = engineStart(argv)
+  const call = at === undefined ? undefined : engineWords(argv.slice(at))
+  const seen: EngineCall | undefined = at === undefined || !marked ? undefined : engineWords(marked.slice(at))
+  if (!call || !seen || !carriesText(call.command)) return undefined
+  const text: BashText = { name: 'gh.py ' + call.command, command: call.command, argv }
+  const title = engineOption(seen, '--title')
+  if (title !== undefined && !title.includes(EXPANDED) && (call.command === 'pr-create' || call.command === 'pr-update')) {
+    text.title = title
+  }
+  const file = engineOption(seen, '--body-file')
+  if (file !== undefined && !file.includes(EXPANDED) && file !== '-' && !(moves && !/^[/~]/.test(file))) text.bodyFile = file
+  return text.title !== undefined || text.bodyFile !== undefined ? text : undefined
+}
+
 // The texts the gh pr commands of a Bash line write, each with the tool's
-// subcommand whose writing rules it keeps. A body read from stdin, one a
-// command substitution makes and no heredoc shows, a title, body or file a
-// shell variable or substitution gives, and a relative file after a cd are left
-// out.
+// subcommand whose writing rules it keeps, and those the engine's runs write.
+// A body read from stdin, one a command substitution makes and no heredoc
+// shows, a title, body or file a shell variable or substitution gives, and a
+// relative file after a cd are left out.
 export function bashTexts(line: string): BashText[] {
   const out: BashText[] = []
   const substituted = substitutes(line)
@@ -162,6 +200,11 @@ export function bashTexts(line: string): BashText[] {
   // the session's.
   const moves = commands.some((argv) => argv[0] === 'cd')
   commands.forEach((argv, n) => {
+    const engine = engineText(argv, marked[n], moves)
+    if (engine) {
+      out.push(engine)
+      return
+    }
     const name = authoringCommand(argv)
     const gh = name?.startsWith('gh pr ') ? ghWords(argv) : undefined
     const command = gh ? LINTED_AS[gh.verb] : undefined

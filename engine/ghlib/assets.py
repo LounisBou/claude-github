@@ -8,6 +8,7 @@ is deliberately not used here.
 import base64
 import hashlib
 import os
+import re
 
 from . import errors, http, repo
 
@@ -18,10 +19,28 @@ BLOCK_SEPARATOR = "\n\n---\n\n"
 TITLE_STRIPPED = str.maketrans("", "", "*]")
 
 
+# What the description lint refuses in the bold line and the alt text of a block, so a
+# title that would break it is refused here, before any block is written. The phrases are
+# hooks/writing.ts NEGATIVE_PHRASES, which a test keeps equal.
+NEGATIVE_PHRASES = (
+    "unchanged", "no dependency", "does not", "doesn't", "is not changed", "left untouched",
+    "no other pull request", "without conflict",
+)
+_NEGATIVE = re.compile(
+    r"(?<![\w-])(%s)(?![\w-])" % "|".join(re.escape(p) for p in NEGATIVE_PHRASES), re.IGNORECASE
+)
+# A `#N` or `repo#N` reference, and a pull request URL: none belongs in the summary.
+_REFERENCE = re.compile(r"#\d|https?://github\.com/[^\s/]+/[^\s/]+/pull/\d", re.IGNORECASE)
+
+
 def _clean_title(title):
     if title is None:
         return None
     stripped = title.strip().translate(TITLE_STRIPPED).strip()
+    if not stripped and title.strip():
+        raise errors.UsageError(
+            "image title is empty once its asterisks and closing brackets are taken out"
+        )
     if not stripped or "\n" in stripped:
         raise errors.UsageError("image title must be one line")
     if len(stripped) > MAX_TITLE_LENGTH:
@@ -31,6 +50,17 @@ def _clean_title(title):
     if stripped.endswith(":"):
         raise errors.UsageError(
             "image title must not end with a colon, which would read as a section label"
+        )
+    if ";" in stripped:
+        raise errors.UsageError("image title must not hold a semicolon: the description rules refuse it")
+    if _REFERENCE.search(stripped):
+        raise errors.UsageError(
+            "image title must not name a pull request or an issue: references go in PRs Dependency or Related PRs"
+        )
+    if _NEGATIVE.search(stripped.replace("\u2019", "'")):
+        raise errors.UsageError(
+            "image title must say what the screen shows, not what it does not do: "
+            "the description rules refuse that phrasing"
         )
     return stripped
 

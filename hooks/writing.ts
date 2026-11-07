@@ -1,10 +1,10 @@
 // The mechanical rules of engine/WRITING.md, checked on the text a write
 // carries before it leaves the machine. Only what code can decide without
-// judgement is here: a semicolon in prose, an attribution trailer, a title on
+// judgement is here: a semicolon in prose, a trailer of any kind, a title on
 // more than one line or far past « about sixty characters », a heading in a
 // pull request description, a TODO item that points to another or joins two
 // actions, a CVE id that is no link, a security update without its tables,
-// the four sections a description ends with, a pull request reference, a
+// the four sections a description ends with and any text after them, a pull request reference, a
 // negative phrase or a bold label in its summary, a horizontal rule other
 // than the `---` between two screenshots.
 // The workflow vocabulary is left out: « session » and « agent » are also real
@@ -56,7 +56,9 @@ export function textFields(command: string, args: Record<string, unknown>): Arra
 // The lines of a markdown text outside fenced code blocks. A fence opens on
 // three or more backticks or tildes and closes on a run of the same character
 // at least as long; an unclosed fence runs to the end, as GitHub draws it.
-export function proseLines(text: string): string[] {
+// Given `fenced`, each line of a fenced block, its fences included, is kept
+// as that text instead of left out.
+export function proseLines(text: string, fenced?: string): string[] {
   const out: string[] = []
   let fence: { char: string; length: number } | null = null
   for (const line of text.split(/\r?\n/)) {
@@ -64,10 +66,12 @@ export function proseLines(text: string): string[] {
     if (fence) {
       if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length
         && line.trim() === marker[1]) fence = null
+      if (fenced !== undefined) out.push(fenced)
       continue
     }
     if (marker) {
       fence = { char: marker[1][0], length: marker[1].length }
+      if (fenced !== undefined) out.push(fenced)
       continue
     }
     out.push(line)
@@ -85,11 +89,13 @@ function strip(line: string): string {
     .replace(/&(#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi, ' ')
 }
 
-const TRAILER = /^\s*(co-authored-by|claude-session)\s*:/i
+// A trailer of any kind: the `<word>-by` family (Co-Authored-By, Signed-off-by,
+// Reviewed-by…), Claude-Session and Change-Id.
+const TRAILER = /^\s*([a-z]+(-[a-z]+)*-by|claude-session|change-id)\s*:/i
 const HEADING = /^ {0,3}#{1,6}(\s|$)/
 
 const SEMICOLON_RULE = 'no semicolon in prose (WRITING.md, « Pull request titles », « Pull request descriptions », « Review comments »); code in backticks or a fenced block may keep one'
-const TRAILER_RULE = 'no trailer or attribution such as Co-Authored-By or Claude-Session (WRITING.md, « Commit messages »)'
+const TRAILER_RULE = 'no trailer of any kind, such as Co-Authored-By, Signed-off-by or Claude-Session (WRITING.md, « Commit messages »)'
 const TITLE_LINE_RULE = 'a title is one line (WRITING.md, « Pull request titles »)'
 const TITLE_LENGTH_RULE = 'a title is about sixty characters at most, this one has '
 const HEADING_RULE = 'no heading of any kind in a pull request description, it starts with the summary text (WRITING.md, « Pull request descriptions »)'
@@ -205,6 +211,7 @@ const OTHER_LABEL_RULE = 'no bold label line other than the four sections, '
   + SECTIONS.map((s) => '`**' + s + ':**`').join(', ') + DESCRIPTIONS
 const REF_RULE = 'no pull request reference in the summary above the sections, `#N`, `repo#N`, `owner/repo#N` or a pull request URL:'
   + ' it goes in PRs Dependency or Related PRs' + DESCRIPTIONS
+const AFTER_RULE = 'nothing after the four sections, a description ends with Related PRs' + DESCRIPTIONS
 const RULE_LINE_RULE = 'no horizontal rule, `---`, `***` or `___`, in a pull request description' + DESCRIPTIONS
   + ': a `---` is kept only between two screenshots, a blank line before it'
 const NEGATIVE_RULE = 'state what the PR does, never what it does not do' + DESCRIPTIONS
@@ -290,6 +297,20 @@ function sectionFaults(lines: string[]): string[] {
   return [...faults]
 }
 
+// Whether anything follows the four sections: after the last section's label
+// and the items right below it, only blank lines. A fenced block is text.
+function textAfterSections(text: string): boolean {
+  const lines = proseLines(text, '```')
+  let last = -1
+  lines.forEach((l, i) => {
+    if ((sectionLabel(l)?.at ?? -1) >= 0) last = i
+  })
+  if (last < 0) return false
+  let end = last + 1
+  while (end < lines.length && lines[end].trim() !== '' && !sectionLabel(lines[end])) end++
+  return lines.slice(end).some((l) => l.trim() !== '')
+}
+
 // The summary: the lines above the first of the four sections.
 function summaryLines(lines: string[]): string[] {
   const first = lines.findIndex((l) => (sectionLabel(l)?.at ?? -1) >= 0)
@@ -328,6 +349,7 @@ function lintField(kind: 'pr' | 'comment', field: string, text: string): Violati
     if (bareCve(lines)) add(CVE_LINK_RULE)
     if (missingCveTables(lines)) add(CVE_TABLE_RULE)
     sectionFaults(lines).forEach(add)
+    if (textAfterSections(text)) add(AFTER_RULE)
     const summary = summaryLines(lines)
     if (summary.some(bareReference)) add(REF_RULE)
     if (lines.some((l, i) => HORIZONTAL_RULE.test(l) && !shotSeparator(lines, i, summary.length))) add(RULE_LINE_RULE)

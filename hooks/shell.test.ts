@@ -3,7 +3,7 @@
 // check over its argv, then the cases of its one change (bash -c, sh -c and
 // zsh -c read again, one level deep).
 import { expect, test } from 'claude-code/testing'
-import { gitSubcommand, simpleCommands } from './shell.ts'
+import { engineCall, gitSubcommand, simpleCommands } from './shell.ts'
 
 // push options that take a value: `git push --repo x --force-with-lease` still forces.
 const PUSHVALUED = new Set(['--repo', '--push-option', '--receive-pack', '--exec'])
@@ -160,4 +160,37 @@ test('the option a shell\'s -o or -O sets is no command line, the -c argument af
   ])
   expect(simpleCommands('bash -O extglob -c "gh pr create"')).toContainEqual(['gh', 'pr', 'create'])
   expect(simpleCommands('bash -euo pipefail -c "git commit -m x"')).toContainEqual(['git', 'commit', '-m', 'x'])
+})
+
+test('the engine\'s valued global options are skipped to its subcommand', () => {
+  for (const line of [
+    'python3 "$GH" --repo o/r pr-merge 5',
+    'python3 "$GH" -R o/r pr-merge 5',
+    'python3 "$GH" --format raw --repo o/r pr-merge 5',
+    'python3 /p/engine/gh.py --repo o/r pr-merge 5',
+  ]) {
+    const call = engineCall(simpleCommands(line)[0])
+    expect(call?.command, line).toBe('pr-merge')
+    expect(call?.positionals, line).toEqual(['5'])
+    expect(call?.repo, line).toBe('o/r')
+  }
+})
+
+test('the values of python\'s -W and -X are no script', () => {
+  for (const line of ['python3 -W ignore engine/gh.py pr-merge 5', 'python3 -X dev -W error /p/engine/gh.py pr-merge 5']) {
+    expect(engineCall(simpleCommands(line)[0])?.command, line).toBe('pr-merge')
+  }
+  expect(engineCall(simpleCommands('python3 -W ignore script.py pr-merge 5')[0])).toBeUndefined()
+})
+
+test('--stdin-json is a stdin call only when it is the sole engine argument', () => {
+  expect(engineCall(simpleCommands('python3 engine/gh.py --stdin-json')[0])).toBeUndefined()
+  for (const line of [
+    'python3 engine/gh.py --repo o/r label-add 12 Ready -- --stdin-json',
+    'python3 engine/gh.py label-add 12 Ready --stdin-json',
+  ]) {
+    const call = engineCall(simpleCommands(line)[0])
+    expect(call?.command, line).toBe('label-add')
+    expect(call?.positionals.slice(0, 2), line).toEqual(['12', 'Ready'])
+  }
 })
