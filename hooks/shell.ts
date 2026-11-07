@@ -299,13 +299,22 @@ export function engineStart(argv: string[]): number | undefined {
 
 // The call the engine's words make, or undefined for none read here.
 export function engineWords(words: string[]): EngineCall | undefined {
+  // The engine reads its request from stdin only when that is its one argument: anywhere
+  // else, or after `--`, the word is an ordinary one.
+  if (words.length === 1 && words[0] === '--stdin-json') return undefined
   const call: EngineCall = { command: '', positionals: [], opts: [] }
+  let optionsEnded = false
   for (let j = 0; j < words.length; j++) {
     const word = words[j]
-    if (word === '--stdin-json') return undefined
+    if (word === '--' && !optionsEnded) {
+      optionsEnded = true
+      continue
+    }
     let flag: string | undefined
     let value: string | undefined
-    if (word.startsWith('--') && word.includes('=')) {
+    if (optionsEnded) {
+      flag = undefined
+    } else if (word.startsWith('--') && word.includes('=')) {
       flag = word.slice(0, word.indexOf('='))
       value = word.slice(word.indexOf('=') + 1)
     } else if (word.startsWith('-') && word !== '-') {
