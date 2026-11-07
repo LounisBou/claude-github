@@ -66,7 +66,7 @@ def pr_gate(args):
     except errors.NotFound:
         raise errors.NotFound("no pull request #%s in %s/%s" % (args.pr, owner, name))
     sha = (pull.get("head") or {}).get("sha") or ""
-    if not _FULL_SHA.match(sha):
+    if not _FULL_SHA.fullmatch(sha):
         raise errors.ApiError("pull request %s has no head sha" % args.pr)
     statuses = http.rest("GET", "/repos/%s/%s/commits/%s/status" % (owner, name, sha))
     runs = http.rest("GET", "/repos/%s/%s/commits/%s/check-runs?per_page=100" % (owner, name, sha))
@@ -155,7 +155,7 @@ def pr_create(args):
 
 
 _MERGE_POLL = 3
-_FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
+_FULL_SHA = re.compile(r"[0-9a-fA-F]{40}")
 # What pr-merge --sha takes: exactly the 40 hex characters of a head, no trailing newline.
 _MERGE_SHA = re.compile(r"[0-9a-fA-F]{40}")
 

@@ -1987,6 +1987,8 @@ gate8 unknown '{"__status":404,"message":"Not Found"}' '{}' '{}'
 check_status "pr-gate of an unknown pull request exits 4" 4 gh8 pr-gate 12
 gate8 nohead '{"number":12,"state":"open","head":{}}' '{}' '{}'
 check_status "pr-gate of a pull request with no head sha exits 3" 3 gh8 pr-gate 12
+gate8 sha-newline '{"number":12,"state":"open","head":{"sha":"'$GATEHEAD'\n"}}' '{"state":"success","statuses":[]}' '{"total_count":0,"check_runs":[]}'
+check_status "pr-gate of a head sha with a trailing newline exits 3" 3 gh8 pr-gate 12
 
 echo "== draft and back =="
 
