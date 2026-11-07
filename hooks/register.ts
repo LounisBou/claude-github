@@ -793,8 +793,13 @@ async function refuseNotReady($: any, act: Act, repo: string, pr: number, r: Rea
 
 // The Bash ready guard failed on its own: under warn the command goes on with
 // a warn line, under enforce it is refused as a readiness that could not be read.
+// An undraft outside auto-merge is refused on the list first, in both phases: only a CI
+// undraft passes there, and the failed read cannot tell whether this is one.
 async function guardThrew($: any, act: Act | undefined, err: any): Promise<string | undefined> {
   const error = String(err?.message ?? err).trim()
+  if (act?.kind === 'undraft' && act.repo && !(await autoMergeRepos($)).has(act.repo.toLowerCase())) {
+    return autoMergeRefusal('undraft', act.repo, act.pr, engineName(act))
+  }
   if (await phaseOf($) === 'enforce') return unverifiedRefusal(act?.repo, act?.pr, error)
   const named: Act = act ?? { kind: 'merge', name: 'the command' }
   await warnAct($, named, 'bash', act?.repo ?? '?', act?.pr ?? '?', '', ['readiness unverified: ' + error])
