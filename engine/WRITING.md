@@ -14,9 +14,8 @@ obvious from the diff itself. No trailer of any kind: no `Co-Authored-By`, no
 workflow mechanics in any durable artifact (code, comment, doc, commit, PR) — the
 history must read as a developer's own work, in business and technical terms only. In
 the Claude plugins themselves, the `claude-*` repositories, these words name the
-plugin's object and are allowed. No
-information specific to GeoNative in a public repository (code, commit, title,
-description).
+plugin's object and are allowed. No information specific to GeoNative in a public
+repository (code, commit, title, description).
 
 Types: `feat`, `fix`, `chore`, `refactor`, `style`, `docs`, `test`, `perf`, `build`,
 `ci`. Examples: `feat(scraper): create TvShow nfo file`, `chore: add json5 dependency`,
