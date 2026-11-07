@@ -684,6 +684,10 @@ check "multi-file JSON lists one entry per image" "2" \
 
 check_status "a title count not matching the file count exits 1" 1 \
   gh3 image-upload "$WORK/shot.png" "$WORK/second.png" --title "Only one"
+check_status "several files without --title exit 1" 1 \
+  gh3 image-upload "$WORK/shot.png" "$WORK/second.png"
+check "several files without --title say a title is required for each" "True" \
+  "$(gh3 image-upload "$WORK/shot.png" "$WORK/second.png" 2>&1 | grep -q 'requires --title' && echo True || echo False)"
 
 echo "== opening and merging a pull request =="
 

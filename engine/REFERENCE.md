@@ -238,7 +238,8 @@ python3 "$GH" image-upload before.png after.png --title "Before" --title "After"
 ```
 
 `--title` given for a multi-file call must be repeated exactly once per file, or the
-call is refused as a usage error.
+call is refused as a usage error. A multi-file call with no `--title` at all is refused
+too: each block between two rules needs its title.
 
 Requires push access to the repository.
 

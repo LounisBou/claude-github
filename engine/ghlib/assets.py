@@ -101,6 +101,10 @@ def image_upload(args):
         raise errors.UsageError(
             "expected %d --title value(s), one per file, got %d" % (len(files), len(args.title))
         )
+    if args.title is None and len(files) > 1:
+        raise errors.UsageError(
+            "image-upload requires --title for each file when more than one file is uploaded"
+        )
     titles = [_clean_title(t) for t in args.title] if args.title is not None else [None] * len(files)
 
     owner, name = repo.owner_repo()
