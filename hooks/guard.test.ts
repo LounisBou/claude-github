@@ -758,6 +758,19 @@ test('a Bash pr-create through gh.py without --draft is refused outside auto-mer
   expect(seen.bash.length).toBe(1)
 })
 
+test('a Bash merge through gh.py with a global --repo or python -W before the script is read as a merge', async ($, on) => {
+  const seen = await world($, on)
+  for (const command of [
+    'python3 "$GH" --repo acme/thing pr-merge 12',
+    'python3 "$GH" -R acme/thing pr-merge 12',
+    'python3 -W ignore /plugins/github/engine/gh.py pr-merge 12 --repo acme/thing',
+  ]) {
+    const out: any = await $.tool.call(bash(command))
+    expect(out.deny, command).toContain('github: gh.py pr-merge refused on acme/thing: this repository is not in auto-merge')
+  }
+  expect(seen.bash.length).toBe(0)
+})
+
 test('a Bash Ready label through gh.py needs the four under enforce', async ($, on) => {
   await inPhase('enforce', async () => {
     const seen = await world($, on, NO_RECORDS)

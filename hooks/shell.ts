@@ -257,9 +257,13 @@ const ENGINE_SCRIPT = /(^|\/)gh\.py$/
 // subcommands, which all share this shape.
 const SCRIPT_VARIABLE = /^\$(\{\w+\}|\w+)$/
 const ENGINE_SUBCOMMAND = /^(pr|label|labels|thread|comment|comments|review|reviewer|assignee|issue|image|auth|file|repo)-[a-z-]+$/
+// The interpreter's options that take the next word as their value.
+const PYTHON_VALUED = new Set(['-W', '-X'])
+// The engine's global options, which come before its subcommand and take a value.
+const ENGINE_GLOBAL_VALUED = new Set(['--repo', '-R', '--format'])
 // The engine's options that take a value, its global --repo and --format included.
 const ENGINE_VALUED = new Set([
-  '--repo', '--format', '--title', '--body-file', '--comments-file', '--base', '--head', '--method', '--sha',
+  '-R', '--repo', '--format', '--title', '--body-file', '--comments-file', '--base', '--head', '--method', '--sha',
   '--state', '--branch', '--pr', '--event', '--review-id', '--path', '--line', '--start-line', '--author',
   '--limit',
 ])
@@ -280,11 +284,15 @@ export function engineStart(argv: string[]): number | undefined {
   let k = 0
   if (PYTHON.test(argv[0] ?? '')) {
     k = 1
-    while (k < argv.length && argv[k].startsWith('-')) k++
+    while (k < argv.length && argv[k].startsWith('-')) k += PYTHON_VALUED.has(argv[k]) ? 2 : 1
   }
   const script = argv[k] ?? ''
   if (ENGINE_SCRIPT.test(script)) return k + 1
-  const first = argv.slice(k + 1).find((w) => !w.startsWith('-'))
+  let first: string | undefined
+  for (let j = k + 1; j < argv.length && first === undefined; j++) {
+    if (ENGINE_GLOBAL_VALUED.has(argv[j])) j++
+    else if (!argv[j].startsWith('-')) first = argv[j]
+  }
   if (k > 0 && SCRIPT_VARIABLE.test(script) && first !== undefined && ENGINE_SUBCOMMAND.test(first)) return k + 1
   return undefined
 }
@@ -307,7 +315,7 @@ export function engineWords(words: string[]): EngineCall | undefined {
     if (flag === undefined) {
       if (call.command === '') call.command = word
       else call.positionals.push(word)
-    } else if (flag === '--repo') {
+    } else if (flag === '--repo' || flag === '-R') {
       call.repo = value
     } else {
       call.opts.push([flag, value])
