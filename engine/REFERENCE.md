@@ -56,7 +56,9 @@ full sha, `labels` the names it carries. `ci.total` counts the check runs plus t
 commit statuses at that head. `ci.result` is `FAILURE` when one failed (`ci.failed`
 names them), `PENDING` when one still runs (`ci.running` counts them) or when one
 proved nothing: `skipped`, or `neutral` on a draft (`ci.skipped` names them), and
-`SUCCESS` otherwise, no check at all included.
+`SUCCESS` otherwise, no check at all included. A check that was skipped never turns green
+by itself: it reads `PENDING` for as long as it stays skipped, in `checks-status` as in
+`pr-gate`.
 
 `file-at-ref` returns `content`, plus `binary`. When the file is not valid UTF-8,
 `binary` is true and `content` holds base64 — the bytes are never decoded lossily.
@@ -369,10 +371,23 @@ the engine names its repository with `--repo`. Elsewhere it is refused in both p
 github: <gh pr merge | gh pr ready> refused on <owner/name>: this repository is not in auto-merge, so a merge or leaving draft needs the operator's explicit word. When he gave it, run mcp__github__gh <pr-merge | pr-ready> {"pr": <n>} on <owner/name>: it checks that the pull request is ready, then asks him in the conversation.
 ```
 
-The engine run from Bash keeps the writing rules too: the `--title` of `pr-create` and
-`pr-update`, and the file a `--body-file` names, are linted as the tool's call would be. A
-request the engine reads from stdin (`gh.py --stdin-json`) is not on the command line: the
-guards do not see it, and neither do they see a `--comments-file`.
+The engine run from Bash keeps the writing rules too: `pr-create`, `pr-comment` and a
+`pr-update` with a title or a body wait for `WRITING.md` to be read, as `gh pr create`,
+`gh pr comment` and `gh pr edit` do, and the `--title` of `pr-create` and `pr-update`, and the
+file a `--body-file` names, are linted as the tool's call would be. An engine act whose
+pull request number cannot be read from the command (`pr-merge {}` fed by an `xargs`,
+`pr-merge "$PR"`) is refused in both phases, never read against the current branch's pull
+request: write the number, or call the tool.
+
+What the guards do not read on that route:
+
+- A request the engine reads from stdin (`gh.py --stdin-json`) is not on the command line:
+  the guards do not see it. Nor do they see an engine script given by a shell variable that is
+  not followed by one of its subcommands, `$PY engine/gh.py …`, `eval`, `uv run`, or an
+  unquoted `${CLAUDE_PLUGIN_ROOT}/engine/gh.py`: run it as `python3 "<root>/engine/gh.py" …`.
+- A `--comments-file` is not read, so its inline comments are not linted.
+- A body file written by the same command line (`printf … > body.md && python3 gh.py
+  pr-create --body-file body.md`) is read before it exists, so it is not linted.
 
 **Records.** A Write, an Edit or a MultiEdit under the records root, and a shell command
 naming that root, a `pr-records/` path or `engine/record.py`, are refused, whatever the command
