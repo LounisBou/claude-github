@@ -5,7 +5,8 @@
 // pull request description, a TODO item that points to another or joins two
 // actions, a CVE id that is no link, a security update without its tables,
 // the four sections a description ends with, a pull request reference, a
-// negative phrase or a bold label in its summary, a horizontal rule.
+// negative phrase or a bold label in its summary, a horizontal rule other
+// than the `---` between two screenshots.
 // The workflow vocabulary is left out: « session » and « agent » are also real
 // product words, and a refusal there would be a guess. Pure functions only:
 // register.ts holds the $ that acts on them.
@@ -205,6 +206,7 @@ const OTHER_LABEL_RULE = 'no bold label line other than the four sections, '
 const REF_RULE = 'no pull request reference in the summary above the sections, `#N`, `repo#N`, `owner/repo#N` or a pull request URL:'
   + ' it goes in PRs Dependency or Related PRs' + DESCRIPTIONS
 const RULE_LINE_RULE = 'no horizontal rule, `---`, `***` or `___`, in a pull request description' + DESCRIPTIONS
+  + ': a `---` is kept only between two screenshots, a blank line before it'
 const NEGATIVE_RULE = 'state what the PR does, never what it does not do' + DESCRIPTIONS
 
 const HORIZONTAL_RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
@@ -223,6 +225,36 @@ const PR_URL = /\bhttps?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/i
 // A line with its images and HTML tags taken out: a screenshot is never prose.
 function withoutImages(line: string): string {
   return line.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/<[a-z][^>]*>/gi, ' ')
+}
+
+// A screenshot as WRITING.md gives it: its title in bold alone on its line,
+// with no colon at its end, which would make it a label, its image alone on
+// the next line.
+const SHOT_TITLE = /^\*\*([^*]+)\*\*$/
+const SHOT_IMAGE = /^(!\[[^\]]*\]\([^)]*\)|<img\b[^>]*>)$/i
+
+function shotTitle(line: string): boolean {
+  const m = SHOT_TITLE.exec(line.trim())
+  return !!m && !m[1].trim().endsWith(':')
+}
+
+function shotImage(line: string): boolean {
+  return SHOT_IMAGE.test(line.trim())
+}
+
+// A `---` that separates two screenshots in the summary: a blank line right
+// above it, so the line above never turns into a heading, a screenshot ending
+// on the last line before that blank one and another starting on the first
+// line below it.
+function shotSeparator(lines: string[], i: number, summaryEnd: number): boolean {
+  if (lines[i].trim() !== '---' || i >= summaryEnd) return false
+  if (i < 3 || lines[i - 1].trim() !== '') return false
+  let above = i - 1
+  while (above >= 0 && lines[above].trim() === '') above--
+  if (above < 1 || !shotImage(lines[above]) || !shotTitle(lines[above - 1])) return false
+  let below = i + 1
+  while (below < summaryEnd && lines[below].trim() === '') below++
+  return below + 1 < summaryEnd && shotTitle(lines[below]) && shotImage(lines[below + 1])
 }
 
 // The section a line labels, its index in SECTIONS, and what follows the label
@@ -298,7 +330,7 @@ function lintField(kind: 'pr' | 'comment', field: string, text: string): Violati
     sectionFaults(lines).forEach(add)
     const summary = summaryLines(lines)
     if (summary.some(bareReference)) add(REF_RULE)
-    if (lines.some((l) => HORIZONTAL_RULE.test(l))) add(RULE_LINE_RULE)
+    if (lines.some((l, i) => HORIZONTAL_RULE.test(l) && !shotSeparator(lines, i, summary.length))) add(RULE_LINE_RULE)
     if (summary.some(negative)) add(NEGATIVE_RULE)
   }
   return found

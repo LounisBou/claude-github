@@ -649,8 +649,19 @@ check "without --title the markdown stays bare" \
 check "without --title the JSON carries no title key" "False" \
   "$(printf '%s' "$untitled" | python3 -c 'import json,sys; print("title" in json.load(sys.stdin))')"
 
-check_status "a title over 60 characters exits 1" 1 \
-  gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..61})"
+check_status "a title over 100 characters exits 1" 1 \
+  gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..101})"
+check "a descriptive title of 66 characters is kept" "Export dialog, open with a month of invoices, mobile 390 px, after" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "Export dialog, open with a month of invoices, mobile 390 px, after" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title"))')"
+check "asterisks and closing brackets are taken out of a title" \
+  "**Login screen [v2**
+![Login screen [v2](https://github.com/acme/thing/blob/pr-assets/$SHA.png?raw=true)" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "**Login** screen [v2]" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin)["markdown"])')"
+check_status "a title made only of asterisks exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "**"
+check_status "a title ending with a colon once its asterisks are out exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "Login screen:**"
+check "a title of exactly 100 characters is kept" "$(printf 'x%.0s' {1..100})" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..100})" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title"))')"
+check_status "a title ending with a colon exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "Login screen:"
 check_status "an empty title after trim exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "   "
 
 printf 'another capture' > "$WORK/second.png"
@@ -675,6 +686,10 @@ check "multi-file JSON lists one entry per image" "2" \
 
 check_status "a title count not matching the file count exits 1" 1 \
   gh3 image-upload "$WORK/shot.png" "$WORK/second.png" --title "Only one"
+check_status "several files without --title exit 1" 1 \
+  gh3 image-upload "$WORK/shot.png" "$WORK/second.png"
+check "several files without --title say a title is required for each" "True" \
+  "$(gh3 image-upload "$WORK/shot.png" "$WORK/second.png" 2>&1 | grep -q 'requires --title' && echo True || echo False)"
 
 echo "== opening and merging a pull request =="
 
@@ -1077,9 +1092,9 @@ check "pending-review-summary uses a sentinel for a missing commit_id" "| src/c.
   "$(gh4 review-pending 7 --format pending-review-summary | tail -1)"
 cp "$WORK/reviews-5-comments-orig.json" "$F4/GET_repos_acme_thing_pulls_7_reviews_5_comments__per_page=100.json"
 
-check "manifest version" "0.13.0" \
+check "manifest version" "0.13.1" \
   "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json")"
-check "marketplace version matches" "0.13.0 0.13.0" \
+check "marketplace version matches" "0.13.1 0.13.1" \
   "$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m["metadata"]["version"], m["plugins"][0]["version"])' "$ROOT/.claude-plugin/marketplace.json")"
 
 for needle in '--sha' 'GH_MERGE_WAIT' 'asynchronous merge endpoint'; do
@@ -1173,6 +1188,14 @@ for needle in 'leaves draft only once it is ready (see « Ready' 'A pull request
   check "WRITING.md Ready pull requests mentions '$needle'" "1" \
     "$(python3 -c 'import sys; print(1 if sys.argv[1] in open(sys.argv[2], encoding="utf-8").read() else 0)' "$needle" "$WRITINGDOC")"
 done
+
+for needle in 'Each screenshot is its descriptive title in bold, alone on its line' 'with no colon at its end' 'separated by a `---` line with a blank line before it' 'other than the `---` between two screenshots'; do
+  check "WRITING.md screenshots mention '$needle'" "1" \
+    "$(grep -qF -- "$needle" "$WRITINGDOC" && echo 1 || echo 0)"
+done
+check "WRITING.md asks for no plain caption under a screenshot" "0" "$(grep -c 'plain caption' "$WRITINGDOC")"
+check "REFERENCE.md gives the image title bound" "1" \
+  "$(grep -qF -- '100 characters or fewer' "$SKILLDOC" && echo 1 || echo 0)"
 
 titles_concise=$(python3 - "$WRITINGDOC" <<'PYTITLES'
 import sys

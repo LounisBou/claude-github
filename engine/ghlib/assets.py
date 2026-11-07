@@ -11,19 +11,26 @@ import os
 
 from . import errors, http, repo
 
-MAX_TITLE_LENGTH = 60
+MAX_TITLE_LENGTH = 100
 BLOCK_SEPARATOR = "\n\n---\n\n"
+# Characters that would break the bold line or the image's alt text the description
+# lint reads: they are taken out of a title rather than refused.
+TITLE_STRIPPED = str.maketrans("", "", "*]")
 
 
 def _clean_title(title):
     if title is None:
         return None
-    stripped = title.strip()
+    stripped = title.strip().translate(TITLE_STRIPPED).strip()
     if not stripped or "\n" in stripped:
-        raise errors.UsageError("image title must be a short, single-line label")
+        raise errors.UsageError("image title must be one line")
     if len(stripped) > MAX_TITLE_LENGTH:
         raise errors.UsageError(
             "image title is longer than %d characters: shorten it" % MAX_TITLE_LENGTH
+        )
+    if stripped.endswith(":"):
+        raise errors.UsageError(
+            "image title must not end with a colon, which would read as a section label"
         )
     return stripped
 
@@ -94,6 +101,10 @@ def image_upload(args):
         raise errors.UsageError(
             "expected %d --title value(s), one per file, got %d" % (len(files), len(args.title))
         )
+    if args.title is None and len(files) > 1:
+        raise errors.UsageError(
+            "image-upload requires --title for each file when more than one file is uploaded"
+        )
     titles = [_clean_title(t) for t in args.title] if args.title is not None else [None] * len(files)
 
     owner, name = repo.owner_repo()
@@ -126,7 +137,7 @@ def register(subparsers):
     parser.add_argument(
         "--title",
         action="append",
-        help="short label (max %d characters) shown above its image; repeat once per file"
+        help="the screenshot's title (max %d characters), in bold above its image; repeat once per file"
         % MAX_TITLE_LENGTH,
     )
     parser.set_defaults(handler=image_upload)
