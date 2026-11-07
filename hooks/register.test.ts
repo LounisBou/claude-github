@@ -1936,6 +1936,36 @@ test('the engine\'s authoring subcommands run through Bash are refused unread, t
   expect(bash).toEqual(passes)
 })
 
+test('the engine\'s review and comment subcommands with a text file are refused unread, without one they pass', async ($, on) => {
+  const bash: string[] = []
+  await stubGuard($, on, [], bash)
+
+  const cases: [string, string][] = [
+    ['python3 engine/gh.py review-submit 3 --event COMMENT --body-file /x', 'gh.py review-submit'],
+    ['python3 engine/gh.py review-submit 3 --event COMMENT --comments-file /x', 'gh.py review-submit'],
+    ['python3 engine/gh.py thread-reply PRRT_x --body-file /x', 'gh.py thread-reply'],
+    ['python3 engine/gh.py comment-edit 99 --body-file /x', 'gh.py comment-edit'],
+    ['python3 engine/gh.py review-pending-create 3 --comments-file /x', 'gh.py review-pending-create'],
+    ['python3 engine/gh.py review-pending-add 3 --review-id 7 --path a.py --line 4 --body-file /x', 'gh.py review-pending-add'],
+  ]
+  for (const [command, named] of cases) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(JSON.stringify(out), command).toContain('before ' + named + ':')
+  }
+  expect(bash).toEqual([])
+  const passes = [
+    'python3 engine/gh.py review-submit 3 --event APPROVE',
+    'python3 engine/gh.py review-pending 3',
+    'python3 engine/gh.py comment-delete 99',
+    'python3 engine/gh.py thread-resolve PRRT_x',
+  ]
+  for (const command of passes) {
+    const out: any = await $.tool.call({ tool: 'Bash', command })
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(bash).toEqual(passes)
+})
+
 test('gh\'s repository option before the noun or the verb is read through', async ($, on) => {
   const bash: string[] = []
   await stubGuard($, on, [], bash)
