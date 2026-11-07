@@ -28,6 +28,9 @@ export type Act = {
   sha?: string
   // The command names no pull request a reader can find (a GraphQL mutation).
   unnamed?: boolean
+  // The engine was given no pull request number a reader can find (`{}` of an
+  // xargs, `$PR`): never read as the current branch's pull request.
+  unreadable?: boolean
   // An undraft through the engine: whether it asks for CI only (`--for-ci`),
   // which keeps Not Ready. A gh pr ready leaves it unset.
   forCi?: boolean
@@ -219,15 +222,16 @@ function apiAct(argv: string[]): Act | undefined {
 function engineAct(call: EngineCall): Act | undefined {
   const repo = call.repo ? repoOf(call.repo) ?? call.repo : undefined
   const number = /^#?\d+$/.test(call.positionals[0] ?? '') ? Number(call.positionals[0].replace('#', '')) : undefined
+  const rest = number !== undefined ? call.positionals.slice(1) : call.positionals
   const at = (kind: ActKind, extra: Partial<Act> = {}): Act => ({
-    kind, name: 'gh.py ' + call.command, ...(repo ? { repo } : {}), ...(number !== undefined ? { pr: number } : {}), ...extra,
+    kind, name: 'gh.py ' + call.command, ...(repo ? { repo } : {}), ...(number !== undefined ? { pr: number } : { unreadable: true }), ...extra,
   })
   const sha = engineOption(call, '--sha')
   if (call.command === 'pr-merge') return at('merge', sha ? { sha } : {})
   if (call.command === 'pr-ready') return at('undraft', { forCi: engineFlag(call, '--for-ci') })
-  if (call.command === 'pr-readiness' && (call.positionals[1] ?? '').toLowerCase() === READY) return at('ready-label')
-  if (call.command === 'label-add' && namesReady(call.positionals.slice(1))) return at('ready-label')
-  if (call.command === 'pr-create' && !engineFlag(call, '--draft')) return at('create')
+  if (call.command === 'pr-readiness' && rest.some((word) => word.toLowerCase() === READY)) return at('ready-label')
+  if (call.command === 'label-add' && namesReady(rest)) return at('ready-label')
+  if (call.command === 'pr-create' && !engineFlag(call, '--draft')) return { kind: 'create', name: 'gh.py pr-create', ...(repo ? { repo } : {}) }
   return undefined
 }
 
@@ -418,6 +422,11 @@ export function unverifiedRefusal(repo: string | undefined, pr: number | string 
 
 export function draftRefusal(act: string): string {
   return 'github: ' + act + ' refused: open it as a draft, then leave draft once ready.'
+}
+
+export function unreadablePrRefusal(act: string): string {
+  return 'github: ' + act + ' refused: the pull request number cannot be read from the command.'
+    + ' Write it as a number, or run the tool\'s mcp__github__gh call with {"pr": <n>}.'
 }
 
 export function unnamedRepoRefusal(act: string): string {

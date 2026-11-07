@@ -13,7 +13,7 @@ import {
 import {
   PRUNE_DAYS, PRUNE_EVERY_MS, RECORDS_REFUSAL, autoMergeRefusal, bashActs, bashPushes, carriesReady, ciUndraft,
   ciUndraftLine, createdPr, draftRefusal, graphqlRefusal, missingItems, notReadyRefusal, parseGate, producerSlug,
-  recordKindFor, toolAct, touchesRecords, unnamedRepoRefusal, unverifiedRefusal, warnLine,
+  recordKindFor, toolAct, touchesRecords, unnamedRepoRefusal, unreadablePrRefusal, unverifiedRefusal, warnLine,
   type Act, type Gate, type Phase, type RecordFile,
 } from './ready.ts'
 
@@ -912,6 +912,7 @@ async function bashReady($: any, act: Act, after: Array<(result: any) => Promise
     return undefined
   }
   if (act.unnamed) return graphqlRefusal(act.kind)
+  if (act.unreadable) return unreadablePrRefusal(act.name)
   if (!act.repo) {
     // A merge or leaving draft is refused in both phases, as the auto-merge
     // split needs the repository. The Ready label is the ready guard's alone.
