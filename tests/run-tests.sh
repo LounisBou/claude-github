@@ -659,6 +659,8 @@ check "asterisks and closing brackets are taken out of a title" \
   "$(gh3 image-upload "$WORK/shot.png" --title "**Login** screen [v2]" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin)["markdown"])')"
 check_status "a title made only of asterisks exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "**"
 check_status "a title ending with a colon once its asterisks are out exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "Login screen:**"
+check "a title of exactly 100 characters is kept" "$(printf 'x%.0s' {1..100})" \
+  "$(gh3 image-upload "$WORK/shot.png" --title "$(printf 'x%.0s' {1..100})" --format raw | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title"))')"
 check_status "a title ending with a colon exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "Login screen:"
 check_status "an empty title after trim exits 1" 1 gh3 image-upload "$WORK/shot.png" --title "   "
 
