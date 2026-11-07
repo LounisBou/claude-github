@@ -741,7 +741,7 @@ test('a Bash pull request opened out of draft in auto-merge warns, then is refus
   })
 })
 
-test('a Bash pull request opened out of draft with no repository named is refused in both phases', async ($, on) => {
+test('a Bash pull request opened out of draft with no repository named is refused under warn', async ($, on) => {
   const seen = await world($, on, { autoMerge: ['acme/thing'] })
   const out: any = await $.tool.call(bash('gh pr create -t "fix: x" -b body'))
   expect(out.deny).toBe('github: gh pr create refused: name the repository with -R owner/name.')
@@ -771,7 +771,7 @@ test('a Bash merge through gh.py in auto-merge meets the ready guard', async ($,
   })
 })
 
-test('a Bash merge or undraft through gh.py with no --repo is refused in both phases', async ($, on) => {
+test('a Bash merge or undraft through gh.py with no --repo is refused under warn', async ($, on) => {
   const seen = await world($, on, { autoMerge: ['acme/thing'] })
   for (const command of [ENGINE + ' pr-merge 12', ENGINE + ' pr-ready 12']) {
     const out: any = await $.tool.call(bash(command))
