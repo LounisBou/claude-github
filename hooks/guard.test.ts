@@ -846,6 +846,39 @@ test('a Bash Ready label through gh.py needs the four under enforce', async ($, 
   })
 })
 
+test('a Bash undraft through gh.py for CI passes in auto-merge too, still Not Ready', async ($, on) => {
+  const seen = await world($, on, { ...NO_RECORDS, autoMerge: ['acme/thing'], ci: { result: 'PENDING', skipped: ['test'] } })
+  const out: any = await $.tool.call(bash(ENGINE + ' pr-ready 12 --for-ci --repo acme/thing'))
+  expect(out.deny).toBeUndefined()
+  expect(seen.bash.length).toBe(1)
+  expect(seen.logs).toEqual(['github: acme/thing#12 out of draft to run CI, still Not Ready'])
+})
+
+test('a Bash Ready label through gh.py that is not ready goes on with a warn line under warn', async ($, on) => {
+  const seen = await world($, on, NO_RECORDS)
+  for (const command of [ENGINE + ' pr-readiness 12 ready --repo acme/thing', ENGINE + ' label-add 12 Ready --repo acme/thing']) {
+    const out: any = await $.tool.call(bash(command))
+    expect(out.deny, command).toBeUndefined()
+  }
+  expect(seen.bash.length).toBe(2)
+  expect(seen.logs.length).toBe(2)
+  expect(seen.logs[0]).toContain('github: gh.py pr-readiness on acme/thing#12 is not ready')
+  expect(seen.logs[1]).toContain('github: gh.py label-add on acme/thing#12 is not ready')
+})
+
+test('a text quoting a gh.py act passes with nothing read', async ($, on) => {
+  const seen = await world($, on)
+  for (const line of [
+    'echo "python3 engine/gh.py pr-merge 12 --repo acme/thing"',
+    'cat <<EOF\npython3 engine/gh.py pr-merge 12 --repo acme/thing\nEOF',
+    'git commit -m "fix: stop running python3 engine/gh.py pr-merge 12 twice"',
+  ]) {
+    const out: any = await $.tool.call(bash(line))
+    expect(out.deny, line).toBeUndefined()
+  }
+  expect(seen.runs).toEqual([])
+})
+
 test('gh.py reads that act on nothing, and a --stdin-json request, pass the ready guard unread', async ($, on) => {
   const seen = await world($, on)
   await $.tool.call(bash(ENGINE + ' pr-get --format pr-number'))

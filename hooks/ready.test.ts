@@ -161,6 +161,18 @@ test('what only looks like an act is none', () => {
   }
 })
 
+test('a text quoting a gh.py act is no act', () => {
+  for (const line of [
+    'echo "python3 engine/gh.py pr-merge 12 --repo o/r"',
+    'cat <<EOF\npython3 engine/gh.py pr-merge 12 --repo o/r\nEOF',
+    'git commit -m "stop running python3 engine/gh.py pr-merge 12 twice"',
+    'gh pr comment 3 -b "run python3 engine/gh.py pr-ready 12 --repo o/r later"',
+    'printf %s "python3 engine/gh.py label-add 12 Ready" > note.txt',
+  ]) {
+    expect(bashActs(line), line).toEqual([])
+  }
+})
+
 test('an act inside bash -c is recognised', () => {
   expect(bashActs('bash -c \'gh pr merge 1 -R o/r\'')).toEqual([{ kind: 'merge', name: 'gh pr merge', repo: 'o/r', pr: 1 }])
 })
